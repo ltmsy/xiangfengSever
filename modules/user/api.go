@@ -1075,9 +1075,8 @@ func (u *User) execLogin(userInfo *Model, flag config.DeviceFlag, device *device
 	// 获取老的token并清除老token数据
 	oldToken, err := u.ctx.Cache().Get(fmt.Sprintf("%s%d%s", u.ctx.GetConfig().Cache.UIDTokenCachePrefix, flag, userInfo.UID))
 	if err != nil {
-		u.Error("获取旧token错误", zap.Error(err))
-		tokenSpan.Finish()
-		return nil, errors.New("获取旧token错误")
+		u.Error("获取旧token失败，继续登录流程", zap.Error(err))
+		oldToken = "" // 设置为空字符串，继续执行登录流程
 	}
 	if flag == config.APP {
 		if oldToken != "" {
@@ -1505,9 +1504,8 @@ func (u *User) loginWithAuthCode(c *wkhttp.Context) {
 	// 获取老的token
 	token, err := u.ctx.Cache().Get(fmt.Sprintf("%s%d%s", u.ctx.GetConfig().Cache.UIDTokenCachePrefix, flag, scaner))
 	if err != nil {
-		u.Error("获取旧token错误", zap.Error(err))
-		c.ResponseError(errors.New("获取旧token错误"))
-		return
+		u.Error("获取旧token失败，生成新token", zap.Error(err))
+		token = "" // 设置为空字符串，继续执行
 	}
 	if strings.TrimSpace(token) == "" {
 		token = util.GenerUUID()

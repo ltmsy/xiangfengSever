@@ -281,9 +281,8 @@ func (m *Manager) deleteAdminUsers(c *wkhttp.Context) {
 	}
 	oldToken, err := m.ctx.Cache().Get(fmt.Sprintf("%s%d%s", m.ctx.GetConfig().Cache.UIDTokenCachePrefix, config.Web, user.UID))
 	if err != nil {
-		m.Error("获取旧token错误", zap.Error(err))
-		c.ResponseError(errors.New("获取旧token错误"))
-		return
+		m.Error("获取旧token失败，继续执行", zap.Error(err))
+		oldToken = "" // 设置为空字符串，继续执行
 	}
 	if oldToken != "" {
 		err = m.ctx.Cache().Delete(m.ctx.GetConfig().Cache.TokenCachePrefix + oldToken)
@@ -932,9 +931,8 @@ func (m *Manager) updatePwd(c *wkhttp.Context) {
 	// 清除token缓存
 	oldToken, err := m.ctx.Cache().Get(fmt.Sprintf("%s%d%s", m.ctx.GetConfig().Cache.UIDTokenCachePrefix, config.Web, user.UID))
 	if err != nil {
-		m.Error("获取旧token错误", zap.Error(err))
-		c.ResponseError(errors.New("获取旧token错误"))
-		return
+		m.Error("获取旧token失败，继续执行", zap.Error(err))
+		oldToken = "" // 设置为空字符串，继续执行
 	}
 	if oldToken != "" {
 		err = m.ctx.Cache().Delete(m.ctx.GetConfig().Cache.TokenCachePrefix + oldToken)
