@@ -48,6 +48,9 @@ func (m *Manager) Route(r *wkhttp.WKHttp) {
 		auth.PUT("/config/update", m.updateSystemConfig)               // 更新单个配置
 		auth.PUT("/config/batch-update", m.batchUpdateConfigs)         // 批量更新配置
 		auth.POST("/config/search", m.searchConfigs)                   // 搜索配置
+		auth.POST("/config/create", m.createConfig)                    // 新增配置项
+		auth.DELETE("/config/delete/:config_key", m.deleteConfig)      // 删除配置项
+		auth.DELETE("/config/batch-delete", m.batchDeleteConfigs)      // 批量删除配置项
 		auth.GET("/config/public", m.getPublicConfigs)                 // 获取公开配置
 	}
 }
@@ -479,4 +482,97 @@ func (m *Manager) getPublicConfigs(c *wkhttp.Context) {
 	}
 
 	c.Response(configs)
+}
+
+// createConfig 新增配置项
+func (m *Manager) createConfig(c *wkhttp.Context) {
+	err := c.CheckLoginRoleIsSuperAdmin()
+	if err != nil {
+		c.ResponseError(err)
+		return
+	}
+
+	var req ConfigCreateRequest
+	if err := c.BindJSON(&req); err != nil {
+		c.ResponseError(errors.New("请求数据格式有误"))
+		return
+	}
+
+	// 获取当前登录用户
+	loginUID := c.GetLoginUID()
+	if loginUID == "" {
+		c.ResponseError(errors.New("用户未登录"))
+		return
+	}
+
+	config, err := m.adminConfigService.CreateConfig(&req, loginUID)
+	if err != nil {
+		m.Error("新增配置失败", zap.Error(err))
+		c.ResponseError(err)
+		return
+	}
+
+	c.Response(config)
+}
+
+// deleteConfig 删除配置项
+func (m *Manager) deleteConfig(c *wkhttp.Context) {
+	err := c.CheckLoginRoleIsSuperAdmin()
+	if err != nil {
+		c.ResponseError(err)
+		return
+	}
+
+	configKey := c.Param("config_key")
+	if strings.TrimSpace(configKey) == "" {
+		c.ResponseError(errors.New("配置键不能为空"))
+		return
+	}
+
+	// 获取当前登录用户
+	loginUID := c.GetLoginUID()
+	if loginUID == "" {
+		c.ResponseError(errors.New("用户未登录"))
+		return
+	}
+
+	err = m.adminConfigService.DeleteConfigWithAuth(configKey, loginUID)
+	if err != nil {
+		m.Error("删除配置失败", zap.Error(err))
+		c.ResponseError(err)
+		return
+	}
+
+	c.ResponseOK()
+}
+
+// batchDeleteConfigs 批量删除配置项
+func (m *Manager) batchDeleteConfigs(c *wkhttp.Context) {
+	err := c.CheckLoginRoleIsSuperAdmin()
+	if err != nil {
+		c.ResponseError(err)
+		return
+	}
+
+	var req ConfigBatchDeleteRequest
+	if err := c.BindJSON(&req); err != nil {
+		c.ResponseError(errors.New("请求数据格式有误"))
+		return
+	}
+
+	// 获取当前登录用户
+	loginUID := c.GetLoginUID()
+	if loginUID == "" {
+		c.ResponseError(errors.New("用户未登录"))
+		return
+	}
+
+	result, err := m.adminConfigService.BatchDeleteConfigs(&req, loginUID)
+	if err != nil {
+		m.Error("批量删除配置失败", zap.Error(err))
+		c.ResponseError(err)
+		return
+	}
+
+	c.Response(result)
 }

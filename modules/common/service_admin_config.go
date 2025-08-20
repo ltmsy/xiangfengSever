@@ -56,6 +56,29 @@ type ConfigSearchRequest struct {
 	PageSize int    `json:"page_size" binding:"required,min=1,max=100"`
 }
 
+// ConfigCreateRequest 配置创建请求
+type ConfigCreateRequest struct {
+	ConfigKey   string `json:"config_key" binding:"required"`
+	ConfigValue string `json:"config_value" binding:"required"`
+	ConfigType  string `json:"config_type" binding:"required"`
+	Description string `json:"description" binding:"required"`
+	Category    string `json:"category" binding:"required"`
+	IsEditable  int    `json:"is_editable"`
+	IsPublic    int    `json:"is_public"`
+	SortOrder   int    `json:"sort_order"`
+}
+
+// ConfigBatchDeleteRequest 批量删除配置请求
+type ConfigBatchDeleteRequest struct {
+	ConfigKeys []string `json:"config_keys" binding:"required"`
+}
+
+// ConfigBatchDeleteResponse 批量删除配置响应
+type ConfigBatchDeleteResponse struct {
+	DeletedCount int      `json:"deleted_count"`
+	FailedKeys   []string `json:"failed_keys"`
+}
+
 // ConfigSearchResponse 配置搜索响应
 type ConfigSearchResponse struct {
 	Configs  []*AdminSystemConfig `json:"configs"`
@@ -324,6 +347,15 @@ func (s *AdminConfigService) validateConfigValue(configType, value string) error
 		if strings.TrimSpace(value) == "" {
 			return errors.New("字符串配置值不能为空")
 		}
+	case "image":
+		// 图片类型验证：检查是否为有效的图片URL或路径
+		if strings.TrimSpace(value) == "" {
+			return errors.New("图片配置值不能为空")
+		}
+		// 可以添加图片格式验证（.jpg, .png, .gif, .webp等）
+		if !s.isValidImagePath(value) {
+			return errors.New("图片配置值格式不正确，应为有效的图片路径或URL")
+		}
 	case "json":
 		// 这里可以添加JSON格式验证
 		if strings.TrimSpace(value) == "" {
@@ -355,4 +387,193 @@ func (s *AdminConfigService) getCategoryDisplayName(category string) string {
 	}
 
 	return category
+}
+
+// isValidImagePath 验证图片路径是否有效
+func (s *AdminConfigService) isValidImagePath(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+
+	// 支持的图片格式
+	validExtensions := []string{".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
+	pathLower := strings.ToLower(path)
+
+	// 检查是否为HTTP/HTTPS URL
+	if strings.HasPrefix(pathLower, "http://") || strings.HasPrefix(pathLower, "https://") {
+		// URL格式，检查是否包含图片扩展名
+		for _, ext := range validExtensions {
+			if strings.HasSuffix(pathLower, ext) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// 本地路径格式，检查是否包含图片扩展名
+	for _, ext := range validExtensions {
+		if strings.HasSuffix(pathLower, ext) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// CreateConfig 创建新配置项
+func (s *AdminConfigService) CreateConfig(req *ConfigCreateRequest, createdBy string) (*AdminSystemConfig, error) {
+	// 参数验证
+	if strings.TrimSpace(req.ConfigKey) == "" {
+		return nil, errors.New("配置键不能为空")
+	}
+	if strings.TrimSpace(req.ConfigValue) == "" {
+		return nil, errors.New("配置值不能为空")
+	}
+	if strings.TrimSpace(req.ConfigType) == "" {
+		return nil, errors.New("配置类型不能为空")
+	}
+	if strings.TrimSpace(req.Description) == "" {
+		return nil, errors.New("配置描述不能为空")
+	}
+	if strings.TrimSpace(req.Category) == "" {
+		return nil, errors.New("配置分类不能为空")
+	}
+
+	// 检查配置键是否已存在
+	existingConfig, err := s.adminConfigDB.GetConfigByKey(req.ConfigKey)
+	if err != nil {
+		s.Error("检查配置键是否存在失败", zap.Error(err))
+		return nil, errors.New("检查配置键是否存在失败")
+	}
+	if existingConfig != nil {
+		return nil, errors.New("配置键已存在")
+	}
+
+	// 验证配置值
+	err = s.validateConfigValue(req.ConfigType, req.ConfigValue)
+	if err != nil {
+		return nil, err
+	}
+
+	// 设置默认值
+	if req.IsEditable == 0 {
+		req.IsEditable = 1
+	}
+	if req.IsPublic == 0 {
+		req.IsPublic = 0
+	}
+	if req.SortOrder == 0 {
+		req.SortOrder = 0
+	}
+
+	// 创建配置项
+	config := &AdminSystemConfig{
+		ConfigKey:   req.ConfigKey,
+		ConfigValue: req.ConfigValue,
+		ConfigType:  req.ConfigType,
+		Description: req.Description,
+		Category:    req.Category,
+		IsEditable:  req.IsEditable,
+		IsPublic:    req.IsPublic,
+		SortOrder:   req.SortOrder,
+		Version:     1,
+		CreatedBy:   createdBy,
+		UpdatedBy:   createdBy,
+	}
+
+	err = s.adminConfigDB.CreateConfig(config)
+	if err != nil {
+		s.Error("创建配置失败", zap.Error(err))
+		return nil, errors.New("创建配置失败")
+	}
+
+	s.Info("配置创建成功", zap.String("config_key", req.ConfigKey))
+	return config, nil
+}
+
+// DeleteConfigWithAuth 删除配置项（带权限检查）
+func (s *AdminConfigService) DeleteConfigWithAuth(configKey string, deletedBy string) error {
+	// 检查配置是否存在
+	config, err := s.adminConfigDB.GetConfigByKey(configKey)
+	if err != nil {
+		s.Error("查询配置失败", zap.Error(err))
+		return errors.New("查询配置失败")
+	}
+	if config == nil {
+		return errors.New("配置不存在")
+	}
+
+	// 检查是否可编辑
+	if config.IsEditable == 0 {
+		return errors.New("该配置项不可删除")
+	}
+
+	// 检查是否为系统核心配置（不允许删除）
+	coreConfigs := []string{
+		"system.site_name", "system.site_logo", "system.site_favicon",
+		"system.default_avatar", "system.default_group_avatar",
+		"security.password_min_length", "security.allow_register",
+	}
+	for _, coreKey := range coreConfigs {
+		if configKey == coreKey {
+			return errors.New("系统核心配置不允许删除")
+		}
+	}
+
+	// 执行删除
+	err = s.adminConfigDB.DeleteConfig(configKey)
+	if err != nil {
+		s.Error("删除配置失败", zap.Error(err))
+		return errors.New("删除配置失败")
+	}
+
+	s.Info("配置删除成功", zap.String("config_key", configKey), zap.String("deleted_by", deletedBy))
+	return nil
+}
+
+// BatchDeleteConfigs 批量删除配置项
+func (s *AdminConfigService) BatchDeleteConfigs(req *ConfigBatchDeleteRequest, deletedBy string) (*ConfigBatchDeleteResponse, error) {
+	if len(req.ConfigKeys) == 0 {
+		return nil, errors.New("配置键列表不能为空")
+	}
+
+	var deletedCount int
+	var failedKeys []string
+
+	// 使用事务进行批量删除
+	tx, err := s.adminConfigDB.BeginTx()
+	if err != nil {
+		s.Error("开启事务失败", zap.Error(err))
+		return nil, errors.New("开启事务失败")
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	for _, configKey := range req.ConfigKeys {
+		err = s.DeleteConfigWithAuth(configKey, deletedBy)
+		if err != nil {
+			failedKeys = append(failedKeys, configKey)
+			s.Warn("删除配置失败", zap.String("config_key", configKey), zap.Error(err))
+			continue
+		}
+		deletedCount++
+	}
+
+	// 提交事务
+	err = tx.Commit()
+	if err != nil {
+		s.Error("提交事务失败", zap.Error(err))
+		return nil, errors.New("提交事务失败")
+	}
+
+	response := &ConfigBatchDeleteResponse{
+		DeletedCount: deletedCount,
+		FailedKeys:   failedKeys,
+	}
+
+	s.Info("批量删除配置完成", zap.Int("deleted_count", deletedCount), zap.Int("failed_count", len(failedKeys)))
+	return response, nil
 }
