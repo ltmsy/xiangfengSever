@@ -21,7 +21,7 @@ wukongIM:
 db:
   mysqlAddr: "tsdd:AxkTdnwwMhkrR8bC@tcp(112.121.164.130:3306)/tsdd?charset=utf8mb4&parseTime=true&loc=Local" # mysql连接地址
   redisAddr: "112.121.164.130:6379" # redis地址
-  redisPass: "" # redis密码
+  redisPass: "123456" # redis密码
   asynctaskRedisAddr: "" # 异步任务的redis地址 不写默认为RedisAddr的地址
 
 ##################### 外网配置 ####################
