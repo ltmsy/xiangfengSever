@@ -66,12 +66,42 @@ func (d *pinnedDB) queryCountWithChannel(channelID string, channelType uint8) (i
 	return cn, err
 }
 
+// 通过当前用户频道ID查询置顶消息数量
+func (d *pinnedDB) queryCountWithCurrentChannel(currentChannelID string, channelType uint8) (int64, error) {
+	var cn int64
+	_, err := d.session.Select("count(*)").From("pinned_message").Where("current_channel_id=? and channel_type=? and is_deleted=0", currentChannelID, channelType).Load(&cn)
+	return cn, err
+}
+
+// 通过当前用户频道ID查询置顶消息
+func (d *pinnedDB) queryWithCurrentChannelID(currentChannelID string, channelType uint8, version int64) ([]*pinnedMessageModel, error) {
+	var list []*pinnedMessageModel
+	_, err := d.session.Select("*").From("pinned_message").Where("current_channel_id=? and channel_type=? and version>?", currentChannelID, channelType, version).Load(&list)
+	return list, err
+}
+
+// 通过消息ID和当前用户频道ID查询置顶消息
+func (d *pinnedDB) queryWithMessageIDAndCurrentChannel(messageID string, currentChannelID string) (*pinnedMessageModel, error) {
+	var model *pinnedMessageModel
+	_, err := d.session.Select("*").From("pinned_message").Where("message_id=? and current_channel_id=?", messageID, currentChannelID).Load(&model)
+	return model, err
+}
+
+// 通过当前用户频道ID查询所有置顶消息
+func (d *pinnedDB) queryAllWithCurrentChannel(currentChannelID string, channelType uint8) ([]*pinnedMessageModel, error) {
+	var list []*pinnedMessageModel
+	_, err := d.session.Select("*").From("pinned_message").Where("current_channel_id=? and channel_type=? and is_deleted=0", currentChannelID, channelType).Load(&list)
+	return list, err
+}
+
 type pinnedMessageModel struct {
-	MessageId   string
-	ChannelID   string
-	ChannelType uint8
-	MessageSeq  uint32
-	IsDeleted   int8
-	Version     int64
+	MessageId         string
+	ChannelID         string
+	OriginalChannelID string
+	CurrentChannelID  string
+	ChannelType       uint8
+	MessageSeq        uint32
+	IsDeleted         int8
+	Version           int64
 	db.BaseModel
 }

@@ -11,7 +11,7 @@ services:
       - ./configs/wk.yaml:/root/wukongim/wk.yaml
       - ./logs/wk:/root/wukongim/logs
   tangsengdaodaoserver:  # 唐僧叨叨的业务服务
-    image: registry.cn-shanghai.aliyuncs.com/wukongim/tangsengdaodaoserver:latest
+    image: tangsengdaodaoserver:latest
     restart: always
     command: "api"
     healthcheck:

@@ -768,7 +768,7 @@ func (co *Conversation) getConversations(c *wkhttp.Context) {
 		for _, resp := range resps {
 			fakeChannelID := resp.ChannelID
 			if resp.ChannelType == common.ChannelTypePerson.Uint8() {
-				fakeChannelID = common.GetFakeChannelIDWith(resp.ChannelID, loginUID)
+				fakeChannelID = common.GetFakeChannelIDWith(loginUID, resp.ChannelID)
 			}
 			channelIds = append(channelIds, fakeChannelID)
 		}

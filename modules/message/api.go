@@ -1,10 +1,14 @@
 package message
 
 import (
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -95,6 +99,7 @@ func (m *Message) Route(r *wkhttp.WKHttp) {
 		message.POST("/offset", m.offset)                         // 清除某频道消息
 		message.PUT("/voicereaded", m.voiceReaded)                // 语音消息设置为已读
 		message.POST("/search", m.search)                         // 消息搜索
+		message.POST("/global", m.globalSearch)                   // 全局搜索
 		message.POST("/typing", m.typing)                         // 发送typing消息
 		message.POST("/channel/sync", m.syncChannelMessage)       // 同步频道消息
 		message.POST("/extra/sync", m.syncMessageExtra)           // 同步消息扩展
@@ -376,6 +381,15 @@ func (m *Message) messageReaded(c *wkhttp.Context) {
 	if req.ChannelType == common.ChannelTypePerson.Uint8() {
 		fakeChannelID = common.GetFakeChannelIDWith(req.ChannelID, loginUID)
 	}
+
+	// 添加详细日志
+	m.Info("消息已读请求参数",
+		zap.String("loginUID", loginUID),
+		zap.String("reqChannelID", req.ChannelID),
+		zap.Uint8("reqChannelType", req.ChannelType),
+		zap.String("fakeChannelID", fakeChannelID),
+		zap.Strings("messageIDs", req.MessageIDs))
+
 	if len(req.MessageIDs) <= 0 {
 		c.ResponseOK()
 		return
@@ -384,11 +398,22 @@ func (m *Message) messageReaded(c *wkhttp.Context) {
 
 	messages, err := m.db.queryMessagesWithMessageIDs(fakeChannelID, messageIDStrs)
 	if err != nil {
+		m.Error("查询消息失败！",
+			zap.String("fakeChannelID", fakeChannelID),
+			zap.Strings("messageIDs", messageIDStrs),
+			zap.String("loginUID", loginUID),
+			zap.String("reqChannelID", req.ChannelID),
+			zap.Uint8("reqChannelType", req.ChannelType))
 		c.ResponseErrorf("查询消息失败！", err)
 		return
 	}
 	if len(messages) <= 0 {
-		m.Warn("没有读取到消息！", zap.Strings("messages", req.MessageIDs))
+		m.Warn("没有读取到消息！",
+			zap.String("fakeChannelID", fakeChannelID),
+			zap.Strings("messageIDs", messageIDStrs),
+			zap.String("loginUID", loginUID),
+			zap.String("reqChannelID", req.ChannelID),
+			zap.Uint8("reqChannelType", req.ChannelType))
 		c.ResponseError(errors.New("没有读取到消息！"))
 		return
 	}
@@ -659,7 +684,7 @@ func (m *Message) syncChannelMessage(c *wkhttp.Context) {
 	}
 	fakeChannelID := req.ChannelID
 	if req.ChannelType == common.ChannelTypePerson.Uint8() { // 如果是群则需要计算群成员是否变化 如果有变化则将群成员加入到克隆表
-		fakeChannelID = common.GetFakeChannelIDWith(req.ChannelID, req.LoginUID)
+		fakeChannelID = common.GetFakeChannelIDWith(req.LoginUID, req.ChannelID)
 	}
 	channelIds := make([]string, 0)
 	channelIds = append(channelIds, fakeChannelID)
@@ -1019,7 +1044,7 @@ func (m *Message) sync(c *wkhttp.Context) {
 	// 频道偏移
 	fakeChannelID := req.ChannelID
 	if req.ChannelType == common.ChannelTypePerson.Uint8() {
-		fakeChannelID = common.GetFakeChannelIDWith(uid, req.ChannelID)
+		fakeChannelID = common.GetFakeChannelIDWith(req.ChannelID, uid)
 	}
 	channelIds := make([]string, 0)
 	channelIds = append(channelIds, fakeChannelID)
@@ -1454,7 +1479,7 @@ func (m *Message) revoke(c *wkhttp.Context) {
 
 	fakeChannelID := channelID
 	if uint8(channelTypeI) == common.ChannelTypePerson.Uint8() {
-		fakeChannelID = common.GetFakeChannelIDWith(channelID, c.GetLoginUID())
+		fakeChannelID = common.GetFakeChannelIDWith(c.GetLoginUID(), channelID)
 	}
 
 	var messageIDs = []string{}
@@ -2179,4 +2204,1347 @@ type ProhibitWordResp struct {
 	IsDeleted int    `json:"is_deleted"` // 是否删除
 	Version   int64  `json:"version"`    // 版本
 	CreatedAt string `json:"created_at"` // 时间
+}
+
+// 全局搜索请求参数
+type globalSearchReq struct {
+	Keyword     string   `json:"keyword"`      // 搜索关键词
+	SearchTypes []string `json:"search_types"` // 搜索类型数组
+	Filters     struct {
+		ChannelID   string `json:"channel_id"`   // 限定频道ID
+		ChannelType uint8  `json:"channel_type"` // 频道类型
+		ContentType uint8  `json:"content_type"` // 内容类型
+		DateRange   struct {
+			StartTime string `json:"start_time"` // 开始时间
+			EndTime   string `json:"end_time"`   // 结束时间
+		} `json:"date_range"`
+		FileTypes []string `json:"file_types"` // 文件类型过滤
+	} `json:"filters"`
+	Pagination struct {
+		Page     uint32 `json:"page"`      // 页码
+		PageSize uint32 `json:"page_size"` // 每页数量
+	} `json:"pagination"`
+	Sort struct {
+		Field string `json:"field"` // 排序字段
+		Order string `json:"order"` // 排序方向
+	} `json:"sort"`
+}
+
+// 全局搜索结果
+type globalSearchResp struct {
+	Total   int64                  `json:"total"`
+	Results map[string]interface{} `json:"results"`
+}
+
+// 聊天搜索结果
+type chatSearchResult struct {
+	Type           string  `json:"type"`
+	MessageID      string  `json:"message_id"`
+	ChannelID      string  `json:"channel_id"`
+	ChannelType    uint8   `json:"channel_type"`
+	FromUID        string  `json:"from_uid"`
+	FromName       string  `json:"from_name"`
+	Content        string  `json:"content"`
+	ContentType    uint8   `json:"content_type"`
+	Timestamp      string  `json:"timestamp"`
+	RelevanceScore float64 `json:"relevance_score"`
+	Highlight      struct {
+		Content string `json:"content"`
+	} `json:"highlight"`
+}
+
+// 用户搜索结果
+type userSearchResult struct {
+	Type           string  `json:"type"`
+	UID            string  `json:"uid"`
+	Name           string  `json:"name"`
+	Username       string  `json:"username"`
+	ShortNo        string  `json:"short_no"`
+	Avatar         string  `json:"avatar"`
+	RelevanceScore float64 `json:"relevance_score"`
+	Highlight      struct {
+		Name string `json:"name"`
+	} `json:"highlight"`
+}
+
+// 群组搜索结果
+type groupSearchResult struct {
+	Type           string  `json:"type"`
+	GroupNo        string  `json:"group_no"`
+	Name           string  `json:"name"`
+	Description    string  `json:"description"`
+	MemberCount    uint32  `json:"member_count"`
+	RelevanceScore float64 `json:"relevance_score"`
+	Highlight      struct {
+		Name string `json:"name"`
+	} `json:"highlight"`
+}
+
+// 应用搜索结果
+type appSearchResult struct {
+	Type           string  `json:"type"`
+	AppID          string  `json:"app_id"`
+	Name           string  `json:"name"`
+	Description    string  `json:"description"`
+	Icon           string  `json:"icon"`
+	RelevanceScore float64 `json:"relevance_score"`
+	Highlight      struct {
+		Name string `json:"name"`
+	} `json:"highlight"`
+}
+
+// 全局搜索
+func (m *Message) globalSearch(c *wkhttp.Context) {
+	loginUID := c.GetLoginUID()
+	var req globalSearchReq
+	if err := c.BindJSON(&req); err != nil {
+		c.ResponseErrorf("数据格式有误！", err)
+		return
+	}
+
+	// 验证必填参数
+	if req.Keyword == "" {
+		c.ResponseError(errors.New("搜索关键词不能为空"))
+		return
+	}
+	if len(req.SearchTypes) == 0 {
+		c.ResponseError(errors.New("搜索类型不能为空"))
+		return
+	}
+
+	// 设置默认分页参数
+	if req.Pagination.Page == 0 {
+		req.Pagination.Page = 1
+	}
+	if req.Pagination.PageSize == 0 {
+		req.Pagination.PageSize = 20
+	}
+	if req.Pagination.PageSize > 100 {
+		req.Pagination.PageSize = 100
+	}
+
+	// 设置默认排序
+	if req.Sort.Field == "" {
+		req.Sort.Field = "relevance"
+	}
+	if req.Sort.Order == "" {
+		req.Sort.Order = "desc"
+	}
+
+	m.Info("全局搜索请求",
+		zap.String("loginUID", loginUID),
+		zap.String("keyword", req.Keyword),
+		zap.Strings("searchTypes", req.SearchTypes))
+
+	results := make(map[string]interface{})
+	total := int64(0)
+
+	// 并发执行各类型搜索
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	for _, searchType := range req.SearchTypes {
+		wg.Add(1)
+		go func(searchType string) {
+			defer wg.Done()
+			var result interface{}
+			var count int64
+			var err error
+
+			switch searchType {
+			case "chat":
+				result, count, err = m.searchChatMessages(req.Keyword, req.Filters, req.Pagination)
+			case "user":
+				result, count, err = m.searchUsers(req.Keyword, req.Pagination)
+			case "group":
+				result, count, err = m.searchGroups(req.Keyword, req.Pagination)
+			case "app":
+				result, count, err = m.searchApps(req.Keyword, req.Pagination)
+			default:
+				m.Warn("不支持的搜索类型", zap.String("searchType", searchType))
+				return
+			}
+
+			if err != nil {
+				m.Error("搜索失败", zap.String("searchType", searchType), zap.Error(err))
+				return
+			}
+
+			mu.Lock()
+			results[searchType] = map[string]interface{}{
+				"total": count,
+				"items": result,
+			}
+			total += count
+			mu.Unlock()
+		}(searchType)
+	}
+
+	wg.Wait()
+
+	response := &globalSearchResp{
+		Total:   total,
+		Results: results,
+	}
+
+	c.Response(response)
+}
+
+// 搜索聊天消息 - 直接查询本地数据库，处理分表
+func (m *Message) searchChatMessages(keyword string, filters struct {
+	ChannelID   string `json:"channel_id"`
+	ChannelType uint8  `json:"channel_type"`
+	ContentType uint8  `json:"content_type"`
+	DateRange   struct {
+		StartTime string `json:"start_time"`
+		EndTime   string `json:"end_time"`
+	} `json:"date_range"`
+	FileTypes []string `json:"file_types"`
+}, pagination struct {
+	Page     uint32 `json:"page"`
+	PageSize uint32 `json:"page_size"`
+}) (interface{}, int64, error) {
+	// 获取所有消息表名
+	tableNames := m.getAllMessageTableNames()
+
+	// 构建搜索条件
+	whereConditions := []string{"is_deleted = 0"}
+	args := []interface{}{}
+
+	// 添加频道过滤
+	if filters.ChannelID != "" {
+		whereConditions = append(whereConditions, "channel_id = ?")
+		args = append(args, filters.ChannelID)
+	}
+	if filters.ChannelType != 0 {
+		whereConditions = append(whereConditions, "channel_type = ?")
+		args = append(args, filters.ChannelType)
+	}
+
+	// 添加时间范围过滤
+	if filters.DateRange.StartTime != "" {
+		startTime, err := time.Parse("2006-01-02 15:04:05", filters.DateRange.StartTime)
+		if err == nil {
+			whereConditions = append(whereConditions, "timestamp >= ?")
+			args = append(args, startTime.Unix())
+		}
+	}
+	if filters.DateRange.EndTime != "" {
+		endTime, err := time.Parse("2006-01-02 15:04:05", filters.DateRange.EndTime)
+		if err == nil {
+			whereConditions = append(whereConditions, "timestamp <= ?")
+			args = append(args, endTime.Unix())
+		}
+	}
+
+	// 添加内容类型过滤
+	if filters.ContentType != 0 {
+		whereConditions = append(whereConditions, "setting = ?")
+		args = append(args, filters.ContentType)
+	}
+
+	// 构建WHERE子句
+	whereClause := strings.Join(whereConditions, " AND ")
+
+	// 分页参数
+	offset := (pagination.Page - 1) * pagination.PageSize
+	limit := pagination.PageSize
+
+	// 在所有表中搜索
+	allResults := make([]*chatSearchResult, 0)
+	totalCount := int64(0)
+
+	for _, tableName := range tableNames {
+		// 查询总数
+		var count int64
+		countQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s AND (payload LIKE ? OR header LIKE ?)",
+			tableName, whereClause)
+		err := m.ctx.DB().QueryRow(countQuery, append(args, "%"+keyword+"%", "%"+keyword+"%")...).Scan(&count)
+		if err != nil {
+			m.Warn("查询表总数失败", zap.String("table", tableName), zap.Error(err))
+			continue
+		}
+		totalCount += count
+
+		// 查询消息内容
+		query := fmt.Sprintf(`
+			SELECT message_id, channel_id, channel_type, from_uid, timestamp, payload, header, setting
+			FROM %s 
+			WHERE %s AND (payload LIKE ? OR header LIKE ?)
+			ORDER BY timestamp DESC
+			LIMIT ? OFFSET ?
+		`, tableName, whereClause)
+
+		rows, err := m.ctx.DB().Query(query, append(args, "%"+keyword+"%", "%"+keyword+"%", limit, offset)...)
+		if err != nil {
+			m.Warn("查询表数据失败", zap.String("table", tableName), zap.Error(err))
+			continue
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var messageID, channelID, fromUID, header string
+			var channelType, setting uint8
+			var timestamp int64
+			var payload []byte
+
+			err := rows.Scan(&messageID, &channelID, &channelType, &fromUID, &timestamp, &payload, &header, &setting)
+			if err != nil {
+				continue
+			}
+
+			// 解析payload获取消息内容
+			content := m.extractMessageContent(payload, header)
+
+			// 计算相关度分数
+			relevanceScore := m.calculateRelevanceScore(keyword, content, header)
+
+			// 获取发送者姓名
+			fromName := m.getUserName(fromUID)
+
+			chatResult := &chatSearchResult{
+				Type:           "chat",
+				MessageID:      messageID,
+				ChannelID:      channelID,
+				ChannelType:    channelType,
+				FromUID:        fromUID,
+				FromName:       fromName,
+				Content:        content,
+				ContentType:    setting,
+				Timestamp:      time.Unix(timestamp, 0).Format("2006-01-02 15:04:05"),
+				RelevanceScore: relevanceScore,
+			}
+
+			// 高亮关键词
+			chatResult.Highlight.Content = m.highlightKeyword(keyword, content)
+
+			allResults = append(allResults, chatResult)
+		}
+	}
+
+	// 按相关度排序
+	sort.Slice(allResults, func(i, j int) bool {
+		return allResults[i].RelevanceScore > allResults[j].RelevanceScore
+	})
+
+	// 应用分页
+	start := int(offset)
+	end := start + int(limit)
+	if start >= len(allResults) {
+		start = len(allResults)
+	}
+	if end > len(allResults) {
+		end = len(allResults)
+	}
+
+	if start < end {
+		allResults = allResults[start:end]
+	} else {
+		allResults = []*chatSearchResult{}
+	}
+
+	return allResults, totalCount, nil
+}
+
+// 搜索用户 - 直接查询本地数据库
+func (m *Message) searchUsers(keyword string, pagination struct {
+	Page     uint32 `json:"page"`
+	PageSize uint32 `json:"page_size"`
+}) (interface{}, int64, error) {
+	// 构建搜索条件
+	whereConditions := []string{"is_deleted = 0"}
+	args := []interface{}{}
+
+	// 支持按姓名、用户名、短编号、手机号搜索
+	searchConditions := []string{
+		"name LIKE ?",
+		"username LIKE ?",
+		"short_no LIKE ?",
+		"phone LIKE ?",
+	}
+
+	searchArgs := []interface{}{
+		"%" + keyword + "%",
+		"%" + keyword + "%",
+		"%" + keyword + "%",
+		"%" + keyword + "%",
+	}
+
+	// 分页参数
+	offset := (pagination.Page - 1) * pagination.PageSize
+	limit := pagination.PageSize
+
+	// 查询总数
+	var totalCount int64
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM user WHERE %s AND (%s)",
+		strings.Join(whereConditions, " AND "), strings.Join(searchConditions, " OR "))
+
+	err := m.ctx.DB().QueryRow(countQuery, append(args, searchArgs...)...).Scan(&totalCount)
+	if err != nil {
+		m.Error("查询用户总数失败", zap.Error(err))
+		return nil, 0, err
+	}
+
+	// 查询用户数据
+	query := fmt.Sprintf(`
+		SELECT uid, name, username, short_no, phone, zone, sex, category, role
+		FROM user 
+		WHERE %s AND (%s)
+		ORDER BY 
+			CASE 
+				WHEN name LIKE ? THEN 1
+				WHEN username LIKE ? THEN 2
+				WHEN short_no LIKE ? THEN 3
+				WHEN phone LIKE ? THEN 4
+				ELSE 5
+			END,
+			name ASC
+		LIMIT ? OFFSET ?
+	`, strings.Join(whereConditions, " AND "), strings.Join(searchConditions, " OR "))
+
+	// 添加排序参数和分页参数
+	queryArgs := append(args, searchArgs...)
+	queryArgs = append(queryArgs, searchArgs...) // 排序条件
+	queryArgs = append(queryArgs, limit, offset)
+
+	rows, err := m.ctx.DB().Query(query, queryArgs...)
+	if err != nil {
+		m.Error("查询用户数据失败", zap.Error(err))
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	userResults := make([]*userSearchResult, 0)
+	for rows.Next() {
+		var uid, name, username, shortNo, phone, zone, category, role string
+		var sex uint8
+
+		err := rows.Scan(&uid, &name, &username, &shortNo, &phone, &zone, &category, &role, &sex)
+		if err != nil {
+			continue
+		}
+
+		// 计算相关度分数
+		relevanceScore := m.calculateUserRelevanceScore(keyword, name, username, shortNo, phone)
+
+		userResult := &userSearchResult{
+			Type:           "user",
+			UID:            uid,
+			Name:           name,
+			Username:       username,
+			ShortNo:        shortNo,
+			Avatar:         "", // 暂时为空，后续可以从用户设置表获取
+			RelevanceScore: relevanceScore,
+		}
+
+		// 高亮关键词
+		userResult.Highlight.Name = m.highlightKeyword(keyword, name)
+
+		userResults = append(userResults, userResult)
+	}
+
+	return userResults, totalCount, nil
+}
+
+// 计算用户相关度分数
+func (m *Message) calculateUserRelevanceScore(keyword, name, username, shortNo, phone string) float64 {
+	score := 0.0
+	keywordLower := strings.ToLower(keyword)
+
+	// 姓名匹配分数
+	if strings.Contains(strings.ToLower(name), keywordLower) {
+		score += 0.8
+		if strings.HasPrefix(strings.ToLower(name), keywordLower) {
+			score += 0.2
+		}
+	}
+
+	// 用户名匹配分数
+	if strings.Contains(strings.ToLower(username), keywordLower) {
+		score += 0.6
+	}
+
+	// 短编号匹配分数
+	if strings.Contains(strings.ToLower(shortNo), keywordLower) {
+		score += 0.5
+	}
+
+	// 手机号匹配分数
+	if strings.Contains(strings.ToLower(phone), keywordLower) {
+		score += 0.4
+	}
+
+	// 完全匹配加分
+	if strings.EqualFold(name, keyword) {
+		score += 0.3
+	}
+
+	return math.Min(score, 1.0)
+}
+
+// 搜索群组 - 直接查询本地数据库
+func (m *Message) searchGroups(keyword string, pagination struct {
+	Page     uint32 `json:"page"`
+	PageSize uint32 `json:"page_size"`
+}) (interface{}, int64, error) {
+	// 构建搜索条件
+	whereConditions := []string{"status = 1"} // 只搜索正常状态的群组
+	args := []interface{}{}
+
+	// 支持按群名称、群编号、群分类搜索
+	searchConditions := []string{
+		"name LIKE ?",
+		"group_no LIKE ?",
+		"category LIKE ?",
+	}
+
+	searchArgs := []interface{}{
+		"%" + keyword + "%",
+		"%" + keyword + "%",
+		"%" + keyword + "%",
+	}
+
+	// 分页参数
+	offset := (pagination.Page - 1) * pagination.PageSize
+	limit := pagination.PageSize
+
+	// 查询总数
+	var totalCount int64
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM `group` WHERE %s AND (%s)",
+		strings.Join(whereConditions, " AND "), strings.Join(searchConditions, " OR "))
+
+	err := m.ctx.DB().QueryRow(countQuery, append(args, searchArgs...)...).Scan(&totalCount)
+	if err != nil {
+		m.Error("查询群组总数失败", zap.Error(err))
+		return nil, 0, err
+	}
+
+	// 查询群组数据
+	query := fmt.Sprintf(`
+		SELECT g.group_no, g.name, g.notice, g.avatar, g.group_type, g.category, g.created_at,
+		       COUNT(gm.uid) as member_count
+		FROM `+"`group`"+` g
+		LEFT JOIN group_member gm ON g.group_no = gm.group_no AND gm.is_deleted = 0
+		WHERE %s AND (%s)
+		GROUP BY g.group_no, g.name, g.notice, g.avatar, g.group_type, g.category, g.created_at
+		ORDER BY 
+			CASE 
+				WHEN g.name LIKE ? THEN 1
+				WHEN g.group_no LIKE ? THEN 2
+				WHEN g.category LIKE ? THEN 3
+				ELSE 4
+			END,
+			g.name ASC
+		LIMIT ? OFFSET ?
+	`, strings.Join(whereConditions, " AND "), strings.Join(searchConditions, " OR "))
+
+	// 添加排序参数和分页参数
+	queryArgs := append(args, searchArgs...)
+	queryArgs = append(queryArgs, searchArgs...) // 排序条件
+	queryArgs = append(queryArgs, limit, offset)
+
+	rows, err := m.ctx.DB().Query(query, queryArgs...)
+	if err != nil {
+		m.Error("查询群组数据失败", zap.Error(err))
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	groupResults := make([]*groupSearchResult, 0)
+	for rows.Next() {
+		var groupNo, name, notice, avatar, category string
+		var groupType uint8
+		var createdAt time.Time
+		var memberCount int64
+
+		err := rows.Scan(&groupNo, &name, &notice, &avatar, &groupType, &category, &createdAt, &memberCount)
+		if err != nil {
+			continue
+		}
+
+		// 计算相关度分数
+		relevanceScore := m.calculateGroupRelevanceScore(keyword, name, groupNo, category)
+
+		groupResult := &groupSearchResult{
+			Type:           "group",
+			GroupNo:        groupNo,
+			Name:           name,
+			Description:    notice,
+			MemberCount:    uint32(memberCount),
+			RelevanceScore: relevanceScore,
+		}
+
+		// 高亮关键词
+		groupResult.Highlight.Name = m.highlightKeyword(keyword, name)
+
+		groupResults = append(groupResults, groupResult)
+	}
+
+	return groupResults, totalCount, nil
+}
+
+// 计算群组相关度分数
+func (m *Message) calculateGroupRelevanceScore(keyword, name, groupNo, category string) float64 {
+	score := 0.0
+	keywordLower := strings.ToLower(keyword)
+
+	// 群名称匹配分数
+	if strings.Contains(strings.ToLower(name), keywordLower) {
+		score += 0.8
+		if strings.HasPrefix(strings.ToLower(name), keywordLower) {
+			score += 0.2
+		}
+	}
+
+	// 群编号匹配分数
+	if strings.Contains(strings.ToLower(groupNo), keywordLower) {
+		score += 0.6
+	}
+
+	// 群分类匹配分数
+	if strings.Contains(strings.ToLower(category), keywordLower) {
+		score += 0.4
+	}
+
+	// 完全匹配加分
+	if strings.EqualFold(name, keyword) {
+		score += 0.3
+	}
+
+	return math.Min(score, 1.0)
+}
+
+// 搜索应用 - 直接查询本地数据库
+func (m *Message) searchApps(keyword string, pagination struct {
+	Page     uint32 `json:"page"`
+	PageSize uint32 `json:"page_size"`
+}) (interface{}, int64, error) {
+	// 构建搜索条件
+	whereConditions := []string{"status = 1"} // 只搜索正常状态的应用
+	args := []interface{}{}
+
+	// 支持按应用名称、描述、分类搜索
+	searchConditions := []string{
+		"name LIKE ?",
+		"description LIKE ?",
+		"app_category LIKE ?",
+	}
+
+	searchArgs := []interface{}{
+		"%" + keyword + "%",
+		"%" + keyword + "%",
+		"%" + keyword + "%",
+	}
+
+	// 分页参数
+	offset := (pagination.Page - 1) * pagination.PageSize
+	limit := pagination.PageSize
+
+	// 查询总数
+	var totalCount int64
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM workplace_app WHERE %s AND (%s)",
+		strings.Join(whereConditions, " AND "), strings.Join(searchConditions, " OR "))
+
+	err := m.ctx.DB().QueryRow(countQuery, append(args, searchArgs...)...).Scan(&totalCount)
+	if err != nil {
+		m.Error("查询应用总数失败", zap.Error(err))
+		return nil, 0, err
+	}
+
+	// 查询应用数据
+	query := fmt.Sprintf(`
+		SELECT app_id, name, description, icon, app_category, jump_type, app_route, web_route, is_paid_app
+		FROM workplace_app 
+		WHERE %s AND (%s)
+		ORDER BY 
+			CASE 
+				WHEN name LIKE ? THEN 1
+				WHEN description LIKE ? THEN 2
+				WHEN app_category LIKE ? THEN 3
+				ELSE 4
+			END,
+			name ASC
+		LIMIT ? OFFSET ?
+	`, strings.Join(whereConditions, " AND "), strings.Join(searchConditions, " OR "))
+
+	// 添加排序参数和分页参数
+	queryArgs := append(args, searchArgs...)
+	queryArgs = append(queryArgs, searchArgs...) // 排序条件
+	queryArgs = append(queryArgs, limit, offset)
+
+	rows, err := m.ctx.DB().Query(query, queryArgs...)
+	if err != nil {
+		m.Error("查询应用数据失败", zap.Error(err))
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	appResults := make([]*appSearchResult, 0)
+	for rows.Next() {
+		var appID, name, description, icon, appCategory string
+		var jumpType, isPaidApp uint8
+		var appRoute, webRoute string
+
+		err := rows.Scan(&appID, &name, &description, &icon, &appCategory, &jumpType, &appRoute, &webRoute, &isPaidApp)
+		if err != nil {
+			continue
+		}
+
+		// 计算相关度分数
+		relevanceScore := m.calculateAppRelevanceScore(keyword, name, description, appCategory)
+
+		appResult := &appSearchResult{
+			Type:           "app",
+			AppID:          appID,
+			Name:           name,
+			Description:    description,
+			Icon:           icon,
+			RelevanceScore: relevanceScore,
+		}
+
+		// 高亮关键词
+		appResult.Highlight.Name = m.highlightKeyword(keyword, name)
+
+		appResults = append(appResults, appResult)
+	}
+
+	return appResults, totalCount, nil
+}
+
+// 计算应用相关度分数
+func (m *Message) calculateAppRelevanceScore(keyword, name, description, appCategory string) float64 {
+	score := 0.0
+	keywordLower := strings.ToLower(keyword)
+
+	// 应用名称匹配分数
+	if strings.Contains(strings.ToLower(name), keywordLower) {
+		score += 0.8
+		if strings.HasPrefix(strings.ToLower(name), keywordLower) {
+			score += 0.2
+		}
+	}
+
+	// 应用描述匹配分数
+	if strings.Contains(strings.ToLower(description), keywordLower) {
+		score += 0.6
+	}
+
+	// 应用分类匹配分数
+	if strings.Contains(strings.ToLower(appCategory), keywordLower) {
+		score += 0.4
+	}
+
+	// 完全匹配加分
+	if strings.EqualFold(name, keyword) {
+		score += 0.3
+	}
+
+	return math.Min(score, 1.0)
+}
+
+// 获取所有消息表名
+func (m *Message) getAllMessageTableNames() []string {
+	tableCount := m.ctx.GetConfig().TablePartitionConfig.MessageTableCount
+	tableNames := make([]string, tableCount)
+
+	for i := 0; i < int(tableCount); i++ {
+		if i == 0 {
+			tableNames[i] = "message"
+		} else {
+			tableNames[i] = fmt.Sprintf("message%d", i)
+		}
+	}
+
+	return tableNames
+}
+
+// 提取消息内容
+func (m *Message) extractMessageContent(payload []byte, header string) string {
+	// 尝试解析payload为JSON
+	var payloadMap map[string]interface{}
+	if err := util.ReadJsonByByte(payload, &payloadMap); err == nil {
+		// 如果是文本消息
+		if content, ok := payloadMap["content"].(string); ok {
+			return content
+		}
+		// 如果是其他类型消息，返回类型描述
+		if msgType, ok := payloadMap["type"].(string); ok {
+			return fmt.Sprintf("[%s消息]", msgType)
+		}
+	}
+
+	// 如果payload解析失败，返回header
+	if header != "" {
+		return header
+	}
+
+	return "[未知消息类型]"
+}
+
+// 计算相关度分数
+func (m *Message) calculateRelevanceScore(keyword, content, header string) float64 {
+	score := 0.0
+
+	// 内容匹配分数
+	if strings.Contains(strings.ToLower(content), strings.ToLower(keyword)) {
+		score += 0.6
+		// 开头匹配加分
+		if strings.HasPrefix(strings.ToLower(content), strings.ToLower(keyword)) {
+			score += 0.2
+		}
+	}
+
+	// header匹配分数
+	if strings.Contains(strings.ToLower(header), strings.ToLower(keyword)) {
+		score += 0.4
+	}
+
+	// 完全匹配加分
+	if strings.EqualFold(content, keyword) {
+		score += 0.3
+	}
+
+	return math.Min(score, 1.0)
+}
+
+// 高亮关键词
+func (m *Message) highlightKeyword(keyword, content string) string {
+	if keyword == "" || content == "" {
+		return content
+	}
+
+	// 使用正则表达式进行大小写不敏感的替换
+	re := regexp.MustCompile(fmt.Sprintf("(?i)(%s)", regexp.QuoteMeta(keyword)))
+	return re.ReplaceAllString(content, "<em>$1</em>")
+}
+
+// 获取用户姓名
+func (m *Message) getUserName(uid string) string {
+	user, err := m.userService.GetUser(uid)
+	if err != nil || user == nil {
+		return "未知用户"
+	}
+	return user.Name
+}
+
+// 会话内消息搜索请求参数
+type conversationSearchReq struct {
+	Keyword     string `json:"keyword"`      // 搜索关键词
+	ChannelID   string `json:"channel_id"`   // 会话ID（必填）
+	ChannelType uint8  `json:"channel_type"` // 会话类型：1-私聊，2-群聊（必填）
+	ContentType uint8  `json:"content_type"` // 内容类型：0-全部，1-文本，2-图片，3-语音，4-视频，5-文件
+	DateRange   struct {
+		StartTime string `json:"start_time"` // 开始时间（可选）
+		EndTime   string `json:"end_time"`   // 结束时间（可选）
+	} `json:"date_range"`
+	Pagination struct {
+		Page     uint32 `json:"page"`      // 页码
+		PageSize uint32 `json:"page_size"` // 每页数量
+	} `json:"pagination"`
+	Sort struct {
+		Field string `json:"field"` // 排序字段：time/relevance
+		Order string `json:"order"` // 排序方向：asc/desc
+	} `json:"sort"`
+}
+
+// 会话内消息搜索结果
+type conversationSearchResp struct {
+	Total   int64                        `json:"total"`
+	Results []*conversationMessageResult `json:"results"`
+}
+
+// 会话内消息搜索结果项
+type conversationMessageResult struct {
+	MessageID      string  `json:"message_id"`
+	FromUID        string  `json:"from_uid"`
+	FromName       string  `json:"from_name"`
+	Content        string  `json:"content"`
+	ContentType    uint8   `json:"content_type"`
+	Timestamp      string  `json:"timestamp"`
+	RelevanceScore float64 `json:"relevance_score"`
+	Highlight      struct {
+		Content string `json:"content"`
+	} `json:"highlight"`
+	// 消息状态信息
+	IsRead    bool `json:"is_read"`    // 是否已读
+	IsDeleted bool `json:"is_deleted"` // 是否已删除
+	IsRevoked bool `json:"is_revoked"` // 是否已撤回
+	// 消息位置信息（便于前端定位）
+	Position struct {
+		TableName   string `json:"table_name"`   // 所在表名
+		TableIndex  int    `json:"table_index"`  // 在表中的索引
+		GlobalIndex int64  `json:"global_index"` // 全局消息索引
+	} `json:"position"`
+}
+
+// 会话内消息搜索
+func (m *Message) conversationSearch(c *wkhttp.Context) {
+	loginUID := c.GetLoginUID()
+	var req conversationSearchReq
+	if err := c.BindJSON(&req); err != nil {
+		c.ResponseErrorf("数据格式有误！", err)
+		return
+	}
+
+	// 参数验证
+	if req.Keyword == "" {
+		c.ResponseError(errors.New("搜索关键词不能为空"))
+		return
+	}
+	if req.ChannelID == "" {
+		c.ResponseError(errors.New("会话ID不能为空"))
+		return
+	}
+	if req.ChannelType == 0 {
+		c.ResponseError(errors.New("会话类型不能为空"))
+		return
+	}
+
+	// 验证用户是否有权限访问该会话
+	if !m.hasConversationAccess(loginUID, req.ChannelID, req.ChannelType) {
+		c.ResponseError(errors.New("无权限访问该会话"))
+		return
+	}
+
+	// 设置默认值
+	if req.Pagination.Page == 0 {
+		req.Pagination.Page = 1
+	}
+	if req.Pagination.PageSize == 0 {
+		req.Pagination.PageSize = 20
+	}
+	if req.Pagination.PageSize > 100 {
+		req.Pagination.PageSize = 100
+	}
+	if req.Sort.Field == "" {
+		req.Sort.Field = "time"
+	}
+	if req.Sort.Order == "" {
+		req.Sort.Order = "desc"
+	}
+
+	// 执行搜索
+	results, total, err := m.searchConversationMessages(req)
+	if err != nil {
+		m.Error("会话内消息搜索失败", zap.Error(err))
+		c.ResponseError(errors.New("搜索失败，请稍后重试"))
+		return
+	}
+
+	response := &conversationSearchResp{
+		Total:   total,
+		Results: results,
+	}
+
+	c.Response(response)
+}
+
+// 搜索会话内消息
+func (m *Message) searchConversationMessages(req conversationSearchReq) ([]*conversationMessageResult, int64, error) {
+	// 获取消息表名
+	tableNames := m.getAllMessageTableNames()
+
+	// 构建搜索条件
+	whereConditions := []string{
+		"is_deleted = 0",
+		"channel_id = ?",
+		"channel_type = ?",
+	}
+	args := []interface{}{
+		req.ChannelID,
+		req.ChannelType,
+	}
+
+	// 添加内容类型过滤
+	if req.ContentType != 0 {
+		whereConditions = append(whereConditions, "setting = ?")
+		args = append(args, req.ContentType)
+	}
+
+	// 添加时间范围过滤
+	if req.DateRange.StartTime != "" {
+		startTime, err := time.Parse("2006-01-02 15:04:05", req.DateRange.StartTime)
+		if err == nil {
+			whereConditions = append(whereConditions, "timestamp >= ?")
+			args = append(args, startTime.Unix())
+		}
+	}
+	if req.DateRange.EndTime != "" {
+		endTime, err := time.Parse("2006-01-02 15:04:05", req.DateRange.EndTime)
+		if err == nil {
+			whereConditions = append(whereConditions, "timestamp <= ?")
+			args = append(args, endTime.Unix())
+		}
+	}
+
+	// 构建WHERE子句
+	whereClause := strings.Join(whereConditions, " AND ")
+
+	// 分页参数
+	offset := (req.Pagination.Page - 1) * req.Pagination.PageSize
+	limit := req.Pagination.PageSize
+
+	// 在所有表中搜索
+	allResults := make([]*conversationMessageResult, 0)
+	totalCount := int64(0)
+	globalIndex := int64(0)
+
+	// 搜索关键词参数
+	searchArgs := append(args, "%"+req.Keyword+"%", "%"+req.Keyword+"%")
+
+	for tableIndex, tableName := range tableNames {
+		// 查询总数
+		var count int64
+		countQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s AND (payload LIKE ? OR header LIKE ?)",
+			tableName, whereClause)
+		err := m.ctx.DB().QueryRow(countQuery, searchArgs...).Scan(&count)
+		if err != nil {
+			m.Warn("查询表总数失败", zap.String("table", tableName), zap.Error(err))
+			continue
+		}
+		totalCount += count
+
+		// 查询消息内容
+		query := fmt.Sprintf(`
+			SELECT message_id, from_uid, timestamp, payload, header, setting, is_deleted, is_revoked
+			FROM %s 
+			WHERE %s AND (payload LIKE ? OR header LIKE ?)
+			ORDER BY timestamp DESC
+			LIMIT ? OFFSET ?
+		`, tableName, whereClause)
+
+		// 添加分页参数
+		queryArgs := append(searchArgs, limit, offset)
+
+		rows, err := m.ctx.DB().Query(query, queryArgs...)
+		if err != nil {
+			m.Warn("查询表数据失败", zap.String("table", tableName), zap.Error(err))
+			continue
+		}
+		defer rows.Close()
+
+		// 处理查询结果
+		tableResults := m.processSearchResults(rows, req.Keyword, tableName, tableIndex, globalIndex)
+		allResults = append(allResults, tableResults...)
+		globalIndex += int64(len(tableResults))
+	}
+
+	// 按相关度或时间排序
+	m.sortSearchResults(allResults, req.Sort)
+
+	// 应用分页
+	allResults = m.applyPagination(allResults, offset, limit)
+
+	return allResults, totalCount, nil
+}
+
+// 处理搜索结果
+func (m *Message) processSearchResults(rows *sql.Rows, keyword, tableName string, tableIndex int, globalIndex int64) []*conversationMessageResult {
+	var results []*conversationMessageResult
+
+	for rows.Next() {
+		var messageID, fromUID, header string
+		var timestamp int64
+		var payload []byte
+		var setting uint8
+		var isDeleted, isRevoked bool
+
+		err := rows.Scan(&messageID, &fromUID, &timestamp, &payload, &header, &setting, &isDeleted, &isRevoked)
+		if err != nil {
+			continue
+		}
+
+		// 解析payload获取消息内容
+		content := m.extractMessageContent(payload, header)
+
+		// 计算相关度分数
+		relevanceScore := m.calculateRelevanceScore(keyword, content, header)
+
+		// 获取发送者姓名
+		fromName := m.getUserName(fromUID)
+
+		// 检查消息是否已读
+		isRead := m.isMessageRead(messageID, fromUID)
+
+		messageResult := &conversationMessageResult{
+			MessageID:      messageID,
+			FromUID:        fromUID,
+			FromName:       fromName,
+			Content:        content,
+			ContentType:    setting,
+			Timestamp:      time.Unix(timestamp, 0).Format("2006-01-02 15:04:05"),
+			RelevanceScore: relevanceScore,
+			IsRead:         isRead,
+			IsDeleted:      isDeleted,
+			IsRevoked:      isRevoked,
+		}
+
+		// 设置位置信息
+		messageResult.Position.TableName = tableName
+		messageResult.Position.TableIndex = tableIndex
+		messageResult.Position.GlobalIndex = globalIndex
+
+		// 高亮关键词
+		messageResult.Highlight.Content = m.highlightKeyword(keyword, content)
+
+		results = append(results, messageResult)
+	}
+
+	return results
+}
+
+// 排序搜索结果
+func (m *Message) sortSearchResults(results []*conversationMessageResult, sortConfig struct {
+	Field string `json:"field"`
+	Order string `json:"order"`
+}) {
+	if sortConfig.Field == "relevance" {
+		sort.Slice(results, func(i, j int) bool {
+			if sortConfig.Order == "asc" {
+				return results[i].RelevanceScore < results[j].RelevanceScore
+			}
+			return results[i].RelevanceScore > results[j].RelevanceScore
+		})
+	} else {
+		// 默认按时间排序
+		sort.Slice(results, func(i, j int) bool {
+			if sortConfig.Order == "asc" {
+				return results[i].Timestamp < results[j].Timestamp
+			}
+			return results[i].Timestamp > results[j].Timestamp
+		})
+	}
+}
+
+// 应用分页
+func (m *Message) applyPagination(results []*conversationMessageResult, offset, limit uint32) []*conversationMessageResult {
+	start := int(offset)
+	end := start + int(limit)
+
+	if start >= len(results) {
+		start = len(results)
+	}
+	if end > len(results) {
+		end = len(results)
+	}
+
+	if start < end {
+		return results[start:end]
+	}
+
+	return []*conversationMessageResult{}
+}
+
+// 验证用户是否有权限访问会话
+func (m *Message) hasConversationAccess(uid, channelID string, channelType uint8) bool {
+	if channelType == 1 {
+		// 私聊：检查是否是会话的参与者
+		return uid == channelID || m.isUserInConversation(uid, channelID)
+	} else if channelType == 2 {
+		// 群聊：检查是否是群成员
+		return m.isGroupMember(uid, channelID)
+	}
+	return false
+}
+
+// 检查用户是否在会话中
+func (m *Message) isUserInConversation(uid, channelID string) bool {
+	// 这里可以根据实际业务逻辑实现
+	// 比如检查好友关系、会话记录等
+	return true // 暂时返回true，实际需要根据业务逻辑判断
+}
+
+// 检查用户是否是群成员
+func (m *Message) isGroupMember(uid, groupNo string) bool {
+	var count int64
+	query := "SELECT COUNT(*) FROM group_member WHERE group_no = ? AND uid = ? AND is_deleted = 0"
+	err := m.ctx.DB().QueryRow(query, groupNo, uid).Scan(&count)
+	return err == nil && count > 0
+}
+
+// 检查消息是否已读
+func (m *Message) isMessageRead(messageID, fromUID string) bool {
+	// 如果消息是自己发送的，直接返回已读
+	// 注意：这里需要传入当前用户ID，暂时返回false，实际使用时需要修改函数签名
+	// if fromUID == currentUID {
+	// 	return true
+	// }
+
+	// 查询消息已读状态
+	var count int64
+	query := "SELECT COUNT(*) FROM member_readed WHERE message_id = ? AND uid = ?"
+	err := m.ctx.DB().QueryRow(query, messageID, fromUID).Scan(&count)
+	return err == nil && count > 0
+}
+
+// 消息定位请求参数
+type messageLocateReq struct {
+	MessageID   string `json:"message_id"`   // 消息ID（必填）
+	ChannelID   string `json:"channel_id"`   // 会话ID（必填）
+	ChannelType uint8  `json:"channel_type"` // 会话类型：1-私聊，2-群聊（必填）
+}
+
+// 消息位置信息结构体
+type messagePosition struct {
+	Page       int    `json:"page"`        // 所在页码
+	Index      int    `json:"index"`       // 在页面中的索引
+	TotalCount int64  `json:"total_count"` // 会话总消息数
+	TableName  string `json:"table_name"`  // 所在表名
+	TableIndex int    `json:"table_index"` // 在表中的索引
+}
+
+// 消息定位响应
+type messageLocateResp struct {
+	Message  *conversationMessageResult `json:"message"`  // 消息详情
+	Position messagePosition            `json:"position"` // 位置信息
+}
+
+// 定位消息
+func (m *Message) locateMessage(req messageLocateReq) (*conversationMessageResult, messagePosition, error) {
+	// 获取消息表名
+	tableNames := m.getAllMessageTableNames()
+
+	// 在所有表中查找消息
+	for tableIndex, tableName := range tableNames {
+		// 查询消息
+		query := fmt.Sprintf(`
+			SELECT message_id, from_uid, timestamp, payload, header, setting, is_deleted, is_revoked
+			FROM %s 
+			WHERE message_id = ? AND channel_id = ? AND channel_type = ?
+		`, tableName)
+
+		var messageID, fromUID, header string
+		var timestamp int64
+		var payload []byte
+		var setting uint8
+		var isDeleted, isRevoked bool
+
+		err := m.ctx.DB().QueryRow(query, req.MessageID, req.ChannelID, req.ChannelType).Scan(
+			&messageID, &fromUID, &timestamp, &payload, &header, &setting, &isDeleted, &isRevoked)
+
+		if err != nil {
+			if err == sql.ErrNoRows {
+				continue // 继续查找下一个表
+			}
+			return nil, messagePosition{}, err
+		}
+
+		// 找到消息，构建结果
+		content := m.extractMessageContent(payload, header)
+		fromName := m.getUserName(fromUID)
+		isRead := m.isMessageRead(messageID, fromUID)
+
+		message := &conversationMessageResult{
+			MessageID:      messageID,
+			FromUID:        fromUID,
+			FromName:       fromName,
+			Content:        content,
+			ContentType:    setting,
+			Timestamp:      time.Unix(timestamp, 0).Format("2006-01-02 15:04:05"),
+			RelevanceScore: 1.0, // 定位到的消息相关度为1.0
+			IsRead:         isRead,
+			IsDeleted:      isDeleted,
+			IsRevoked:      isRevoked,
+		}
+
+		// 设置位置信息
+		message.Position.TableName = tableName
+		message.Position.TableIndex = tableIndex
+		message.Position.GlobalIndex = 0 // 暂时设为0，实际需要计算
+
+		// 计算消息在会话中的位置
+		position := m.calculateMessagePosition(req.ChannelID, req.ChannelType, timestamp, tableName, tableIndex)
+
+		return message, position, nil
+	}
+
+	// 未找到消息
+	return nil, messagePosition{}, nil
+}
+
+// 计算消息在会话中的位置
+func (m *Message) calculateMessagePosition(channelID string, channelType uint8, messageTimestamp int64, tableName string, tableIndex int) messagePosition {
+	// 计算会话总消息数和消息位置（优化：一次遍历完成两个计算）
+	var totalCount, messageIndex int64
+	tableNames := m.getAllMessageTableNames()
+
+	for _, table := range tableNames {
+		// 计算总消息数
+		var count int64
+		countQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE channel_id = ? AND channel_type = ? AND is_deleted = 0", table)
+		err := m.ctx.DB().QueryRow(countQuery, channelID, channelType).Scan(&count)
+		if err == nil {
+			totalCount += count
+		}
+
+		// 计算消息位置（按时间排序）
+		positionQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE channel_id = ? AND channel_type = ? AND is_deleted = 0 AND timestamp > ?", table)
+		err = m.ctx.DB().QueryRow(positionQuery, channelID, channelType, messageTimestamp).Scan(&messageIndex)
+		if err == nil {
+			break
+		}
+	}
+
+	// 计算页码和索引（假设每页20条）
+	pageSize := int64(20)
+	page := int(messageIndex/pageSize) + 1
+	index := int(messageIndex % pageSize)
+
+	return messagePosition{
+		Page:       page,
+		Index:      index,
+		TotalCount: totalCount,
+		TableName:  tableName,
+		TableIndex: tableIndex,
+	}
+}
+
+// 消息定位
+func (m *Message) messageLocate(c *wkhttp.Context) {
+	loginUID := c.GetLoginUID()
+	var req messageLocateReq
+	if err := c.BindJSON(&req); err != nil {
+		c.ResponseErrorf("数据格式有误！", err)
+		return
+	}
+
+	// 参数验证
+	if req.MessageID == "" {
+		c.ResponseError(errors.New("消息ID不能为空"))
+		return
+	}
+	if req.ChannelID == "" {
+		c.ResponseError(errors.New("会话ID不能为空"))
+		return
+	}
+	if req.ChannelType == 0 {
+		c.ResponseError(errors.New("会话类型不能为空"))
+		return
+	}
+
+	// 验证用户是否有权限访问该会话
+	if !m.hasConversationAccess(loginUID, req.ChannelID, req.ChannelType) {
+		c.ResponseError(errors.New("无权限访问该会话"))
+		return
+	}
+
+	// 定位消息
+	message, position, err := m.locateMessage(req)
+	if err != nil {
+		m.Error("消息定位失败", zap.Error(err))
+		c.ResponseError(errors.New("消息定位失败，请稍后重试"))
+		return
+	}
+
+	if message == nil {
+		c.ResponseError(errors.New("消息不存在或已被删除"))
+		return
+	}
+
+	response := &messageLocateResp{
+		Message:  message,
+		Position: position,
+	}
+
+	c.Response(response)
 }

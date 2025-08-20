@@ -14,17 +14,19 @@ import (
 type Manager struct {
 	ctx *config.Context
 	log.Log
-	db          *db
-	appconfigDB *appConfigDB
+	db                 *db
+	appconfigDB        *appConfigDB
+	adminConfigService *AdminConfigService
 }
 
 // NewManager NewManager
 func NewManager(ctx *config.Context) *Manager {
 	return &Manager{
-		ctx:         ctx,
-		Log:         log.NewTLog("commonManager"),
-		db:          newDB(ctx.DB()),
-		appconfigDB: newAppConfigDB(ctx),
+		ctx:                ctx,
+		Log:                log.NewTLog("commonManager"),
+		db:                 newDB(ctx.DB()),
+		appconfigDB:        newAppConfigDB(ctx),
+		adminConfigService: NewAdminConfigService(ctx.DB()),
 	}
 }
 
@@ -38,6 +40,15 @@ func (m *Manager) Route(r *wkhttp.WKHttp) {
 		auth.PUT("/common/appmodule", m.updateAppModule)         // 修改app模块
 		auth.POST("/common/appmodule", m.addAppModule)           // 新增app模块
 		auth.DELETE("/common/:sid/appmodule", m.deleteAppModule) // 删除app模块
+
+		// 配置管理接口
+		auth.GET("/config/categories", m.getConfigCategories)          // 获取配置分类列表
+		auth.GET("/config/list", m.getAllConfigsGrouped)               // 获取所有配置（按分类分组）
+		auth.GET("/config/category/:category", m.getConfigsByCategory) // 根据分类获取配置
+		auth.PUT("/config/update", m.updateSystemConfig)               // 更新单个配置
+		auth.PUT("/config/batch-update", m.batchUpdateConfigs)         // 批量更新配置
+		auth.POST("/config/search", m.searchConfigs)                   // 搜索配置
+		auth.GET("/config/public", m.getPublicConfigs)                 // 获取公开配置
 	}
 }
 func (m *Manager) deleteAppModule(c *wkhttp.Context) {
@@ -307,4 +318,165 @@ type managerAppModule struct {
 	Name   string `json:"name"`
 	Desc   string `json:"desc"`
 	Status int    `json:"status"` // 模块状态 1.可选 0.不可选 2.选中不可编辑
+}
+
+// ==================== 配置管理接口实现 ====================
+
+// getConfigCategories 获取配置分类列表
+func (m *Manager) getConfigCategories(c *wkhttp.Context) {
+	err := c.CheckLoginRoleIsSuperAdmin()
+	if err != nil {
+		c.ResponseError(err)
+		return
+	}
+
+	categories, err := m.adminConfigService.GetConfigCategories()
+	if err != nil {
+		m.Error("获取配置分类失败", zap.Error(err))
+		c.ResponseError(errors.New("获取配置分类失败"))
+		return
+	}
+
+	c.Response(categories)
+}
+
+// getAllConfigsGrouped 获取所有配置（按分类分组）
+func (m *Manager) getAllConfigsGrouped(c *wkhttp.Context) {
+	err := c.CheckLoginRoleIsSuperAdmin()
+	if err != nil {
+		c.ResponseError(err)
+		return
+	}
+
+	configs, err := m.adminConfigService.GetAllConfigsGrouped()
+	if err != nil {
+		m.Error("获取所有配置失败", zap.Error(err))
+		c.ResponseError(errors.New("获取所有配置失败"))
+		return
+	}
+
+	c.Response(configs)
+}
+
+// getConfigsByCategory 根据分类获取配置
+func (m *Manager) getConfigsByCategory(c *wkhttp.Context) {
+	err := c.CheckLoginRoleIsSuperAdmin()
+	if err != nil {
+		c.ResponseError(err)
+		return
+	}
+
+	category := c.Param("category")
+	if strings.TrimSpace(category) == "" {
+		c.ResponseError(errors.New("分类参数不能为空"))
+		return
+	}
+
+	configs, err := m.adminConfigService.GetConfigsByCategory(category)
+	if err != nil {
+		m.Error("根据分类获取配置失败", zap.Error(err))
+		c.ResponseError(errors.New("根据分类获取配置失败"))
+		return
+	}
+
+	c.Response(configs)
+}
+
+// updateSystemConfig 更新单个配置
+func (m *Manager) updateSystemConfig(c *wkhttp.Context) {
+	err := c.CheckLoginRoleIsSuperAdmin()
+	if err != nil {
+		c.ResponseError(err)
+		return
+	}
+
+	var req ConfigUpdateRequest
+	if err := c.BindJSON(&req); err != nil {
+		c.ResponseError(errors.New("请求数据格式有误"))
+		return
+	}
+
+	// 获取当前登录用户
+	loginUID := c.GetLoginUID()
+	if loginUID == "" {
+		c.ResponseError(errors.New("用户未登录"))
+		return
+	}
+
+	err = m.adminConfigService.UpdateConfig(&req, loginUID)
+	if err != nil {
+		m.Error("更新配置失败", zap.Error(err))
+		c.ResponseError(err)
+		return
+	}
+
+	c.ResponseOK()
+}
+
+// batchUpdateConfigs 批量更新配置
+func (m *Manager) batchUpdateConfigs(c *wkhttp.Context) {
+	err := c.CheckLoginRoleIsSuperAdmin()
+	if err != nil {
+		c.ResponseError(err)
+		return
+	}
+
+	var req ConfigBatchUpdateRequest
+	if err := c.BindJSON(&req); err != nil {
+		c.ResponseError(errors.New("请求数据格式有误"))
+		return
+	}
+
+	// 获取当前登录用户
+	loginUID := c.GetLoginUID()
+	if loginUID == "" {
+		c.ResponseError(errors.New("用户未登录"))
+		return
+	}
+
+	err = m.adminConfigService.BatchUpdateConfigs(&req, loginUID)
+	if err != nil {
+		m.Error("批量更新配置失败", zap.Error(err))
+		c.ResponseError(err)
+		return
+	}
+
+	c.ResponseOK()
+}
+
+// searchConfigs 搜索配置
+func (m *Manager) searchConfigs(c *wkhttp.Context) {
+	err := c.CheckLoginRoleIsSuperAdmin()
+	if err != nil {
+		c.ResponseError(err)
+		return
+	}
+
+	var req ConfigSearchRequest
+	if err := c.BindJSON(&req); err != nil {
+		c.ResponseError(errors.New("请求数据格式有误"))
+		return
+	}
+
+	result, err := m.adminConfigService.SearchConfigs(&req)
+	if err != nil {
+		m.Error("搜索配置失败", zap.Error(err))
+		c.ResponseError(errors.New("搜索配置失败"))
+		return
+	}
+
+	c.Response(result)
+}
+
+// getPublicConfigs 获取公开配置
+func (m *Manager) getPublicConfigs(c *wkhttp.Context) {
+	// 公开接口，无需权限验证
+	configs, err := m.adminConfigService.GetPublicConfigs()
+	if err != nil {
+		m.Error("获取公开配置失败", zap.Error(err))
+		c.ResponseError(errors.New("获取公开配置失败"))
+		return
+	}
+
+	c.Response(configs)
 }

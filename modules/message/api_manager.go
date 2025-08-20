@@ -1,7 +1,9 @@
 package message
 
 import (
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -53,6 +55,7 @@ func (m *Manager) Route(r *wkhttp.WKHttp) {
 		auth.POST("/message/sendall", m.sendMsgToAllUsers)            // 给所有用户发送一条消息
 		auth.GET("/message/record", m.record)                         // 消息记录
 		auth.GET("/message/recordpersonal", m.recordpersonal)         // 单聊聊天记录
+		auth.GET("/message/recorduser", m.recorduser)                 // 查询指定用户的所有聊天记录
 		auth.POST("/message/prohibit_words", m.addProhibitWords)      // 添加违禁词
 		auth.GET("/message/prohibit_words", m.prohibitWords)          // 查询违禁词
 		auth.DELETE("/message/prohibit_words", m.deleteProhibitWords) // 删除违禁词
@@ -547,6 +550,262 @@ func (m *Manager) recordpersonal(c *wkhttp.Context) {
 		List:  list,
 	})
 }
+
+// recorduser 查询指定用户的所有聊天记录
+func (m *Manager) recorduser(c *wkhttp.Context) {
+	err := c.CheckLoginRole()
+	if err != nil {
+		c.ResponseError(err)
+		return
+	}
+	uid := c.Query("uid")
+	pageIndex, pageSize := c.GetPage()
+
+	// 新增筛选参数
+	direction := c.Query("direction")      // "send" 发送的消息, "receive" 接收的消息, "" 全部
+	startTime := c.Query("start_time")     // 开始时间 "2025-08-17 00:00:00"
+	endTime := c.Query("end_time")         // 结束时间 "2025-08-17 23:59:59"
+	messageType := c.Query("message_type") // 消息类型 "1"文本, "2"图片, "3"语音等
+
+	if strings.TrimSpace(uid) == "" {
+		c.ResponseError(errors.New("uid不能为空"))
+		return
+	}
+
+	// 获取所有用户列表，用于查找与该用户的聊天
+	allUsers, err := m.userService.GetAllUsers()
+	if err != nil {
+		m.Error("获取用户列表失败", zap.Error(err))
+		c.ResponseError(errors.New("获取用户列表失败"))
+		return
+	}
+
+	allMessages := make([]*recordVO, 0)
+	totalCount := int64(0)
+
+	// 遍历所有用户，查找与该用户的聊天记录
+	for _, user := range allUsers {
+		if user.UID == uid {
+			continue // 跳过自己
+		}
+
+		// 生成假频道ID
+		channelID := common.GetFakeChannelIDWith(uid, user.UID)
+
+		// 查询该频道的消息
+		msgs, err := m.managerDB.queryWithChannelID(channelID, uint64(pageIndex), uint64(pageSize))
+		if err != nil {
+			m.Error("查询消息记录错误", zap.Error(err))
+			continue
+		}
+
+		if len(msgs) > 0 {
+			// 查询消息扩展信息
+			msgIds := make([]string, 0)
+			for _, msg := range msgs {
+				msgIds = append(msgIds, strconv.FormatInt(msg.MessageID, 10))
+			}
+
+			msgExtrs, err := m.managerDB.queryMsgExtrWithMsgIds(msgIds)
+			if err != nil {
+				m.Error("查询消息扩展错误", zap.Error(err))
+				continue
+			}
+
+			// 获取发送者信息
+			uids := make([]string, 0)
+			for _, msg := range msgs {
+				uids = append(uids, msg.FromUID)
+			}
+
+			userList, err := m.userService.GetUsers(uids)
+			if err != nil {
+				m.Error("查询用户信息错误", zap.Error(err))
+				continue
+			}
+
+			// 构建消息列表
+			for _, msg := range msgs {
+				// 方向筛选：只发送的消息
+				if direction == "send" && msg.FromUID != uid {
+					continue
+				}
+				// 方向筛选：只接收的消息
+				if direction == "receive" && msg.FromUID == uid {
+					continue
+				}
+
+				// 时间范围筛选
+				msgTime := time.Unix(msg.Timestamp, 0)
+				m.Info("时间筛选", zap.String("msgTime", msgTime.Format("2006-01-02 15:04:05")), zap.String("startTime", startTime), zap.String("endTime", endTime), zap.Int64("msgTimestamp", msg.Timestamp))
+				if startTime != "" {
+					// 使用本地时区解析时间
+					loc, _ := time.LoadLocation("Local")
+					start, err := time.ParseInLocation("2006-01-02 15:04:05", startTime, loc)
+					if err != nil {
+						m.Warn("解析开始时间失败", zap.Error(err), zap.String("startTime", startTime))
+					} else {
+						startUnix := start.Unix()
+						m.Info("时间比较", zap.String("msgTime", msgTime.Format("2006-01-02 15:04:05")), zap.String("startTime", start.Format("2006-01-02 15:04:05")), zap.Int64("msgUnix", msg.Timestamp), zap.Int64("startUnix", startUnix), zap.Bool("msgTime.Before(start)", msg.Timestamp < startUnix))
+						if msg.Timestamp < startUnix {
+							m.Info("消息时间早于开始时间，跳过", zap.String("msgTime", msgTime.Format("2006-01-02 15:04:05")), zap.String("startTime", start.Format("2006-01-02 15:04:05")))
+							continue
+						}
+					}
+				}
+				if endTime != "" {
+					// 使用本地时区解析时间
+					loc, _ := time.LoadLocation("Local")
+					end, err := time.ParseInLocation("2006-01-02 15:04:05", endTime, loc)
+					if err != nil {
+						m.Warn("解析结束时间失败", zap.Error(err), zap.String("endTime", endTime))
+					} else {
+						endUnix := end.Unix()
+						m.Info("时间比较", zap.String("msgTime", msgTime.Format("2006-01-02 15:04:05")), zap.String("endTime", end.Format("2006-01-02 15:04:05")), zap.Int64("msgUnix", msg.Timestamp), zap.Int64("endUnix", endUnix), zap.Bool("msgTime.After(end)", msg.Timestamp > endUnix))
+						if msg.Timestamp > endUnix {
+							m.Info("消息时间晚于结束时间，跳过", zap.String("msgTime", msgTime.Format("2006-01-02 15:04:05")), zap.String("endTime", end.Format("2006-01-02 15:04:05")))
+							continue
+						}
+					}
+				}
+
+				sendName := ""
+				for _, user := range userList {
+					if user.UID == msg.FromUID {
+						sendName = user.Name
+						break
+					}
+				}
+
+				isDeleted := 0
+				revoke := 0
+				editedAt := 0
+				readedCount := 0
+				var payloadMap map[string]interface{}
+
+				// 查找消息扩展信息
+				for _, extr := range msgExtrs {
+					msgID, _ := strconv.ParseInt(extr.MessageID, 10, 64)
+					if msgID == msg.MessageID {
+						isDeleted = extr.IsDeleted
+						revoke = extr.Revoke
+						editedAt = extr.EditedAt
+						readedCount = extr.ReadedCount
+						if extr.ContentEdit.String != "" {
+							err := util.ReadJsonByByte([]byte(extr.ContentEdit.String), &payloadMap)
+							if err != nil {
+								log.Warn("负荷数据不是json格式！", zap.Error(err), zap.String("payload", string(extr.ContentEdit.String)))
+							}
+						}
+					}
+				}
+
+				if payloadMap == nil {
+					err := util.ReadJsonByByte(msg.Payload, &payloadMap)
+					if err != nil {
+						log.Warn("负荷数据不是json格式！", zap.Error(err), zap.String("payload", string(msg.Payload)))
+					}
+				}
+
+				// 消息类型筛选
+				if messageType != "" {
+					m.Info("消息类型筛选", zap.String("messageType", messageType), zap.Any("payloadMap", payloadMap))
+					if payloadMap != nil {
+						if msgType, ok := payloadMap["type"]; ok {
+							m.Info("找到消息类型", zap.Any("msgType", msgType), zap.String("msgTypeType", fmt.Sprintf("%T", msgType)))
+							// 处理不同类型的type值
+							var typeStr string
+							switch v := msgType.(type) {
+							case float64:
+								typeStr = strconv.Itoa(int(v))
+							case int:
+								typeStr = strconv.Itoa(v)
+							case string:
+								typeStr = v
+							case json.Number:
+								typeStr = v.String()
+							default:
+								m.Warn("未知的消息类型格式", zap.Any("msgType", msgType), zap.String("msgTypeType", fmt.Sprintf("%T", msgType)))
+								continue
+							}
+							m.Info("转换后的类型字符串", zap.String("typeStr", typeStr), zap.String("messageType", messageType))
+							if typeStr != messageType {
+								m.Info("类型不匹配，跳过消息", zap.String("typeStr", typeStr), zap.String("messageType", messageType))
+								continue
+							}
+							m.Info("类型匹配，保留消息")
+						} else {
+							m.Info("消息中没有type字段，跳过")
+							continue
+						}
+					} else {
+						m.Info("payloadMap为nil，跳过消息")
+						continue
+					}
+				}
+
+				var deviceDBID int64 = 0
+				if strings.Contains(msg.ClientMsgNo, "_") {
+					tempStrs := strings.Split(msg.ClientMsgNo, "_")
+					if len(tempStrs) > 2 {
+						str := tempStrs[1]
+						if str != "" {
+							deviceDBID, err = strconv.ParseInt(str, 10, 64)
+							if err != nil {
+								deviceDBID = 0
+							}
+						}
+					}
+				}
+
+				messageId := strconv.FormatInt(msg.MessageID, 10)
+
+				allMessages = append(allMessages, &recordVO{
+					MessageID:   messageId,
+					MessageSeq:  msg.MessageSeq,
+					Sender:      msg.FromUID,
+					SenderName:  sendName,
+					Signal:      msg.Signal,
+					Payload:     payloadMap,
+					IsDeleted:   isDeleted,
+					ReadedCount: readedCount,
+					Revoke:      revoke,
+					DeviceDBID:  deviceDBID,
+					CreatedAt:   msgTime.Format("2006-01-02 15:04:05"),
+					EditedAt:    editedAt,
+				})
+
+				totalCount++
+			}
+		}
+	}
+
+	// 按时间排序（最新的在前）
+	sort.Slice(allMessages, func(i, j int) bool {
+		return allMessages[i].CreatedAt > allMessages[j].CreatedAt
+	})
+
+	// 分页处理
+	start := int((pageIndex - 1) * pageSize)
+	end := start + int(pageSize)
+	if start >= len(allMessages) {
+		start = len(allMessages)
+	}
+	if end > len(allMessages) {
+		end = len(allMessages)
+	}
+
+	var pageMessages []*recordVO
+	if start < len(allMessages) {
+		pageMessages = allMessages[start:end]
+	}
+
+	c.Response(&recordResp{
+		Count: totalCount,
+		List:  pageMessages,
+	})
+}
+
 func (m *Manager) record(c *wkhttp.Context) {
 	err := c.CheckLoginRole()
 	if err != nil {

@@ -1,8 +1,8 @@
 # #################### 基础配置 ####################
-mode: "debug" #   运行模式 debug or release
+mode: "release" #   运行模式 debug or release
 # adminpwd: "123456" # 管理员密码
 #addr: ":8090" # api监听地址
-#grpcAddr: "0.0.0.0:6979" # webhook grpc监听地址 给悟空IM提供的
+grpcAddr: "0.0.0.0:6979" # webhook grpc监听地址 给悟空IM提供的
 #appName: "唐僧叨叨" # 项目名称
 #rootDir: "tsdddata" # 数据根目录
 #messageSaveAcrossDevice: true # 消息是否跨设备保存（换设备登录消息是否还能同步到老消息）
@@ -13,28 +13,28 @@ mode: "debug" #   运行模式 debug or release
 #eventPoolSize: 100 # 事件池大小
 
 ##################### 悟空IM配置 ####################
-#wukongIM:
-#  apiURL: "" # 悟空IM的api地址 格式： http://xx.xx.xx.xx:5001
-#  managerToken: "" # 悟空IM的管理者token 悟空IM配置了就需要填写，没配置就不需要
+wukongIM:
+  apiURL: "http://112.121.164.130:5001" # 悟空IM的api地址 格式： http://xx.xx.xx.xx:5001
+  managerToken: "" # 悟空IM的管理者token 悟空IM配置了就需要填写，没配置就不需要
 
 ##################### db ####################
-#db:
-#  mysqlAddr: "root:demo@tcp(127.0.0.1:3306)/test?charset=utf8mb4&parseTime=true" # mysql连接地址
-#  redisAddr: "" # redis地址
-#  redisPass: "" # redis密码
-#  asynctaskRedisAddr: "" # 异步任务的redis地址 不写默认为RedisAddr的地址
+db:
+  mysqlAddr: "tsdd:AxkTdnwwMhkrR8bC@tcp(112.121.164.130:3306)/tsdd?charset=utf8mb4&parseTime=true&loc=Local" # mysql连接地址
+  redisAddr: "112.121.164.130:6379" # redis地址
+  redisPass: "" # redis密码
+  asynctaskRedisAddr: "" # 异步任务的redis地址 不写默认为RedisAddr的地址
 
 ##################### 外网配置 ####################
-#external:
-#  ip: "" # 外网ip
-#  baseURL: "" # 外网访问地址 例如 http://10.2.3.1:8090
-#  webLoginURL: "" # web im的登录地址 例如 https://web.tangsengdaodao.com
+external:
+  ip: "112.121.164.130" # 外网ip
+  baseURL: "http://112.121.164.130:8090" # 外网访问地址 例如 http://10.2.3.1:8090
+  webLoginURL: "http://112.121.164.130:82" # web im的登录地址 例如 https://web.tangsengdaodao.com
 
 ##################### 日志配置 ####################
-#logger:
-#  level: 0 # 日志级别 0:未配置,将根据mode属性判断 1:debug 2:info 3:warn 4:error
-#  dir: "./logs" # 日志目录
-#  lineNum: false # 是否打印行号
+logger:
+  level: 2 # 日志级别 0:未配置,将根据mode属性判断 1:debug 2:info 3:warn 4:error
+  dir: "./logs" # 日志目录
+  lineNum: false # 是否打印行号
 
 ##################### 短信配置 ####################
 smsCode: "123456" # 测试短信验证码， 如果不为空，则短信验证码为该值。
@@ -54,11 +54,11 @@ smsCode: "123456" # 测试短信验证码， 如果不为空，则短信验证�
 #  templateId: "" # unisms TemplateId 验证码变量名为code
 
 ##################### 文件服务 ####################
-#fileService: "minio" # 文件服务 minio or aliyunOSS or seaweedFS or qiniu
-#minio: # minio配置
-#  url: "" # minio地址 格式：http://xx.xx.xx.xx:9000
-#  accessKeyID: "" # minio accessKeyID
-#  secretAccessKey: ""  # minio secretAccessKey
+fileService: "minio" # 文件服务 minio or aliyunOSS or seaweedFS or qiniu
+minio: # minio配置
+  url: "http://112.121.164.130:9000" # minio地址 格式：http://xx.xx.xx.xx:9000
+  accessKeyID: "minioadmin" # minio accessKeyID
+  secretAccessKey: "minioadmin"  # minio secretAccessKey
 #oss:  # aliyun oss配置
 #  endpoint: "" # oss endpoint 例如 oss-cn-hangzhou.aliyuncs.com
 #  bucketURL: "" # oss bucketURL 例如 https://xxxx.oss-cn-hangzhou.aliyuncs.com

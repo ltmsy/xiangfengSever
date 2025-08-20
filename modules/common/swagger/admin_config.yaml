@@ -1,0 +1,420 @@
+openapi: 3.0.0
+info:
+  title: 配置管理API
+  description: 后台管理系统配置管理相关接口
+  version: 1.0.0
+
+servers:
+  - url: /v1/manager
+    description: 管理后台API
+
+paths:
+  /config/categories:
+    get:
+      summary: 获取配置分类列表
+      description: 获取所有配置分类信息，用于前端tab切换
+      tags:
+        - 配置管理
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: "success"
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ConfigCategory'
+        '401':
+          description: 未授权
+        '403':
+          description: 权限不足
+
+  /config/list:
+    get:
+      summary: 获取所有配置（按分类分组）
+      description: 获取所有配置项，按分类分组返回，用于前端tab页面展示
+      tags:
+        - 配置管理
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: "success"
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ConfigListResponse'
+        '401':
+          description: 未授权
+        '403':
+          description: 权限不足
+
+  /config/category/{category}:
+    get:
+      summary: 根据分类获取配置
+      description: 根据指定分类获取该分类下的所有配置项
+      tags:
+        - 配置管理
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: category
+          in: path
+          required: true
+          description: 配置分类
+          schema:
+            type: string
+            enum: [group, system, security, notification, ui, message, file, robot, statistics]
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: "success"
+                  data:
+                    $ref: '#/components/schemas/ConfigListResponse'
+        '400':
+          description: 参数错误
+        '401':
+          description: 未授权
+        '403':
+          description: 权限不足
+
+  /config/update:
+    put:
+      summary: 更新单个配置
+      description: 更新指定配置项的值
+      tags:
+        - 配置管理
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigUpdateRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: "success"
+        '400':
+          description: 请求参数错误
+        '401':
+          description: 未授权
+        '403':
+          description: 权限不足
+
+  /config/batch-update:
+    put:
+      summary: 批量更新配置
+      description: 批量更新多个配置项的值
+      tags:
+        - 配置管理
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigBatchUpdateRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: "success"
+        '400':
+          description: 请求参数错误
+        '401':
+          description: 未授权
+        '403':
+          description: 权限不足
+
+  /config/search:
+    post:
+      summary: 搜索配置
+      description: 根据关键词和分类搜索配置项
+      tags:
+        - 配置管理
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigSearchRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: "success"
+                  data:
+                    $ref: '#/components/schemas/ConfigSearchResponse'
+        '400':
+          description: 请求参数错误
+        '401':
+          description: 未授权
+        '403':
+          description: 权限不足
+
+  /config/public:
+    get:
+      summary: 获取公开配置
+      description: 获取所有公开的配置项，无需权限验证
+      tags:
+        - 配置管理
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: "success"
+                  data:
+                    type: object
+                    additionalProperties:
+                      type: string
+        '500':
+          description: 服务器内部错误
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ConfigCategory:
+      type: object
+      properties:
+        category:
+          type: string
+          description: 配置分类键
+          example: "group"
+        category_name:
+          type: string
+          description: 配置分类显示名称
+          example: "群组配置"
+        count:
+          type: integer
+          description: 该分类下的配置项数量
+          example: 8
+
+    ConfigListResponse:
+      type: object
+      properties:
+        category:
+          type: string
+          description: 配置分类键
+          example: "group"
+        category_name:
+          type: string
+          description: 配置分类显示名称
+          example: "群组配置"
+        configs:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminSystemConfig'
+
+    AdminSystemConfig:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: 配置ID
+          example: 1
+        config_key:
+          type: string
+          description: 配置键
+          example: "group.notify_member_join"
+        config_value:
+          type: string
+          description: 配置值
+          example: "1"
+        config_type:
+          type: string
+          description: 配置类型
+          example: "boolean"
+          enum: [string, number, boolean, json]
+        description:
+          type: string
+          description: 配置描述
+          example: "群成员加入时是否通知其他成员"
+        category:
+          type: string
+          description: 配置分类
+          example: "group"
+        is_editable:
+          type: integer
+          description: 是否可编辑
+          example: 1
+          enum: [0, 1]
+        is_public:
+          type: integer
+          description: 是否公开
+          example: 1
+          enum: [0, 1]
+        sort_order:
+          type: integer
+          description: 排序顺序
+          example: 100
+        version:
+          type: integer
+          description: 版本号
+          example: 1
+        created_at:
+          type: string
+          description: 创建时间
+          example: "2025-01-17 23:22:43"
+        updated_at:
+          type: string
+          description: 更新时间
+          example: "2025-01-17 23:22:43"
+        created_by:
+          type: string
+          description: 创建人UID
+          example: "system"
+        updated_by:
+          type: string
+          description: 更新人UID
+          example: "admin_001"
+
+    ConfigUpdateRequest:
+      type: object
+      required:
+        - config_key
+        - config_value
+      properties:
+        config_key:
+          type: string
+          description: 配置键
+          example: "group.notify_member_join"
+        config_value:
+          type: string
+          description: 配置值
+          example: "1"
+
+    ConfigBatchUpdateRequest:
+      type: object
+      required:
+        - configs
+      properties:
+        configs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConfigUpdateRequest'
+          minItems: 1
+
+    ConfigSearchRequest:
+      type: object
+      required:
+        - page
+        - page_size
+      properties:
+        keyword:
+          type: string
+          description: 搜索关键词
+          example: "群组"
+        category:
+          type: string
+          description: 配置分类
+          example: "group"
+        page:
+          type: integer
+          description: 页码
+          example: 1
+          minimum: 1
+        page_size:
+          type: integer
+          description: 每页数量
+          example: 20
+          minimum: 1
+          maximum: 100
+
+    ConfigSearchResponse:
+      type: object
+      properties:
+        configs:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminSystemConfig'
+        total:
+          type: integer
+          description: 总数量
+          example: 50
+        page:
+          type: integer
+          description: 当前页码
+          example: 1
+        page_size:
+          type: integer
+          description: 每页数量
+          example: 20 

@@ -1,16 +1,16 @@
 
 # 配置文件是yaml格式，请注意缩进，有些工具不会自动缩进，请注意 打开注释#的时候 前面要去掉一个空格 比如 # Addr: "tcp://0.0.0.0:5100" 打开注释后应该与mode对齐
 
-mode: "debug" # 运行模式 模式 debug 测试 release 正式 bench 压力测试
-#addr: "tcp://0.0.0.0:5100" # tcp监听地址
-#httpAddr: "0.0.0.0:5001" #  http api的监听地址  默认：0.0.0.0:5001
+mode: "release" # 运行模式 模式 debug 测试 release 正式 bench 压力测试
+addr: "tcp://0.0.0.0:5100" # tcp监听地址
+httpAddr: "0.0.0.0:5001" #  http api的监听地址  默认：0.0.0.0:5001
 #dataDir: ~/wukongimdata # 数据存储目录
 tokenAuthOn: true # 是否开启token验证 默认为false，如果不开启任何人都可以连接到此节点，生产环境建议开启
 #managerToken: "" # 管理员token 如果此字段有值，则API接口需要在请求头中添加token字段，值为此字段的值
-#wsAddr: "ws://0.0.0.0:5200"  # websocket ws 监听地址 
+wsAddr: "ws://0.0.0.0:5200"  # websocket ws 监听地址 
 #wssAddr: "wss://0.0.0.0:5210"  # websocket wss 监听地址 
 external: # 公网配置
- ip: "#EXTERNAL_IP#" # 如果节点部署在内网，需要配置外网ip，否则外网的客户端无法连接到此节点
+ ip: "112.121.164.130" # 如果节点部署在内网，需要配置外网ip，否则外网的客户端无法连接到此节点
 #  tcpAddr: "" #  默认自动获取， 节点的TCP地址 对外公开，APP端长连接通讯  格式： ip:port  （支持域名配置）
 #  wsAddr: "" # 默认自动获取， 节点的wsAdd地址 对外公开 WEB端长连接通讯 格式： ws://ip:port  （支持域名配置）
 #   wssAddr: "" # 对外的wssAddr地址，也就是客户端真正连接的地址 格式：wss://ip:port （支持域名配置）
@@ -19,14 +19,14 @@ external: # 公网配置
 #wssConfig:
   #certFile: "" # wss证书文件路径
   #keyFile: "" # wss证书key文件路径
-#ginMode: "release" # gin框架的模式 debug 调试 release 正式 test 测试
-#logger: 
-#  level: 0 # 日志级别 0:未配置,将根据mode属性判断 1:debug 2:info 3:warn 4:error
-#  dir: "./logs" # 日志目录
-#  lineNum: false # 是否打印行号
-#monitor: 
-#  on: true # 是否开启监控
-#  addr: "0.0.0.0:5300" # 监控监听地址 默认为 0.0.0.0:5300
+ginMode: "release" # gin框架的模式 debug 调试 release 正式 test 测试
+logger: 
+  level: 2 # 日志级别 0:未配置,将根据mode属性判断 1:debug 2:info 3:warn 4:error
+  dir: "./logs" # 日志目录
+  lineNum: false # 是否打印行号
+monitor: 
+  on: true # 是否开启监控
+  addr: "0.0.0.0:5300" # 监控监听地址 默认为 0.0.0.0:5300
 #demo: 
 #  on: true # 是否开启demo
 #  addr: "0.0.0.0:5172" # demo监听地址 默认为 0.0.0.0:5172
