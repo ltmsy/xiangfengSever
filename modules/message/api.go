@@ -54,6 +54,7 @@ type Message struct {
 	commonService       commonapi.IService
 	fileService         file.IService
 	channelService      chservice.IService
+	notificationService *commonapi.NotificationService
 	mutex               sync.Mutex
 }
 
@@ -80,6 +81,7 @@ func New(ctx *config.Context) *Message {
 		commonService:       commonapi.NewService(ctx),
 		fileService:         file.NewService(ctx),
 		channelService:      channel.NewService(ctx),
+		notificationService: commonapi.NewNotificationService(*ctx),
 	}
 	m.ctx.AddEventListener(event.GroupMemberAdd, m.handleGroupMemberAddEvent)
 	m.ctx.AddEventListener(event.GroupMemberScanJoin, m.handleGroupMemberScanJoinEvent)

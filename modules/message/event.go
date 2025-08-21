@@ -422,8 +422,47 @@ func (m *Message) updateMembersChannelOffset(groupNO string, members []*config.U
 			tx.Rollback()
 			return err
 		}
-		if groupInfo.AllowViewHistoryMsg == int(common.GroupAllowViewHistoryMsgEnabled) {
-			model.MessageSeq = 0
+		// 检查群组设置是否允许查看历史消息
+		canViewHistory := false
+
+		// 优先使用群组自身设置
+		if groupInfo.AllowViewHistoryMsg == 1 {
+			canViewHistory = true
+			m.Debug("使用群组设置：允许新成员查看历史消息",
+				zap.String("groupNo", groupNO),
+				zap.String("memberUID", model.UID))
+		} else if groupInfo.AllowViewHistoryMsg == 0 {
+			canViewHistory = false
+			m.Debug("使用群组设置：不允许新成员查看历史消息",
+				zap.String("groupNo", groupNO),
+				zap.String("memberUID", model.UID))
+		} else {
+			// 如果群组没有特定设置，则使用系统配置
+			if m.notificationService != nil {
+				canViewHistory = m.notificationService.IsNewMemberSeeHistoryEnabled()
+				m.Debug("使用系统配置：新成员查看历史消息",
+					zap.Bool("canViewHistory", canViewHistory),
+					zap.String("groupNo", groupNO),
+					zap.String("memberUID", model.UID))
+			} else {
+				m.Debug("通知服务未初始化，默认允许新成员查看历史消息",
+					zap.String("groupNo", groupNO),
+					zap.String("memberUID", model.UID))
+				canViewHistory = true // 默认允许
+			}
+		}
+
+		if canViewHistory {
+			model.MessageSeq = 0 // 设置为0表示可以查看所有历史消息
+			m.Debug("设置新成员可查看所有历史消息",
+				zap.String("groupNo", groupNO),
+				zap.String("memberUID", model.UID),
+				zap.Uint32("messageSeq", 0))
+		} else {
+			m.Debug("设置新成员只能查看加入后的消息",
+				zap.String("groupNo", groupNO),
+				zap.String("memberUID", model.UID),
+				zap.Uint32("messageSeq", model.MessageSeq))
 		}
 		err = m.channelOffsetDB.insertOrUpdateTx(model, tx)
 		if err != nil {

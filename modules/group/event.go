@@ -182,7 +182,13 @@ func (g *Group) handleGroupMemberAddEvent(data []byte, commit config.EventCommit
 				g.Error("解析JSON失败！", zap.Error(err))
 				return
 			}
-			_ = g.ctx.SendGroupMemberAdd(req)
+
+			// 检查进群通知配置是否启用
+			if g.notificationService.IsGroupMemberJoinNotifyEnabled() {
+				_ = g.ctx.SendGroupMemberAdd(req)
+			} else {
+				g.Debug("进群通知已禁用，跳过发送", zap.String("groupNo", req.GroupNo))
+			}
 		},
 	}
 }
@@ -295,27 +301,31 @@ func (g *Group) handleOrgOrDeptCreateEvent(data []byte, commit config.EventCommi
 		commit(err)
 		return
 	}
-	// 发送一条系统消息
-	content := fmt.Sprintf("欢迎%s加入%s，新成员入群可查看所有历史消息", req.OperatorName, req.Name)
-	err = g.ctx.SendMessage(&config.MsgSendReq{
-		Header: config.MsgHeader{
-			NoPersist: 0,
-			RedDot:    1,
-			SyncOnce:  0, // 只同步一次
-		},
-		ChannelID:   req.GroupNo,
-		ChannelType: common.ChannelTypeGroup.Uint8(),
-		Payload: []byte(util.ToJson(map[string]interface{}{
-			"from_uid":  req.Operator,
-			"from_name": req.OperatorName,
-			"content":   content,
-			"type":      common.GroupMemberAdd,
-		})),
-	})
-	if err != nil {
-		g.Error("发送系统消息错误")
-		commit(err)
-		return
+	// 检查进群通知配置是否启用，然后发送系统消息
+	if g.notificationService.IsGroupMemberJoinNotifyEnabled() {
+		content := fmt.Sprintf("欢迎%s加入%s，新成员入群可查看所有历史消息", req.OperatorName, req.Name)
+		err = g.ctx.SendMessage(&config.MsgSendReq{
+			Header: config.MsgHeader{
+				NoPersist: 0,
+				RedDot:    1,
+				SyncOnce:  0, // 只同步一次
+			},
+			ChannelID:   req.GroupNo,
+			ChannelType: common.ChannelTypeGroup.Uint8(),
+			Payload: []byte(util.ToJson(map[string]interface{}{
+				"from_uid":  req.Operator,
+				"from_name": req.OperatorName,
+				"content":   content,
+				"type":      common.GroupMemberAdd,
+			})),
+		})
+		if err != nil {
+			g.Error("发送系统消息错误")
+			commit(err)
+			return
+		}
+	} else {
+		g.Debug("进群欢迎消息通知已禁用，跳过发送", zap.String("groupNo", req.GroupNo))
 	}
 	commit(nil)
 }

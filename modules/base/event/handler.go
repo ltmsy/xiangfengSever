@@ -145,7 +145,14 @@ func (e *Event) handleGroupMemberRemoveEvent(model *Model) {
 				e.Error("解析JSON失败！", zap.Error(err), zap.String("data", model.Data))
 				return
 			}
-			err = e.ctx.SendGroupMemberRemove(req)
+
+			// 检查踢人通知配置是否启用
+			if e.notificationService.IsGroupMemberKickNotifyEnabled() {
+				err = e.ctx.SendGroupMemberRemove(req)
+			} else {
+				e.Debug("踢人通知已禁用，跳过发送", zap.String("groupNo", req.GroupNo))
+				err = nil // 设置为nil，表示成功处理
+			}
 			e.updateEventStatus(err, model.VersionLock, model.Id)
 		},
 	}

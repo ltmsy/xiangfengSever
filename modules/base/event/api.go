@@ -3,6 +3,7 @@ package event
 import (
 	"fmt"
 
+	"github.com/TangSengDaoDao/TangSengDaoDaoServer/modules/common"
 	"github.com/TangSengDaoDao/TangSengDaoDaoServer/modules/file"
 	"github.com/TangSengDaoDao/TangSengDaoDaoServerLib/config"
 	"github.com/TangSengDaoDao/TangSengDaoDaoServerLib/pkg/log"
@@ -63,16 +64,18 @@ type Event struct {
 	db  *DB
 	ctx *config.Context
 	log.Log
-	fileService file.IService
+	fileService         file.IService
+	notificationService *common.NotificationService
 }
 
 // New 创建一个事件
 func New(ctx *config.Context) *Event {
 	e := &Event{
-		ctx:         ctx,
-		db:          NewDB(ctx.DB()),
-		Log:         log.NewTLog("Event"),
-		fileService: file.NewService(ctx),
+		ctx:                 ctx,
+		db:                  NewDB(ctx.DB()),
+		Log:                 log.NewTLog("Event"),
+		fileService:         file.NewService(ctx),
+		notificationService: common.NewNotificationService(*ctx),
 	}
 	e.registerHandlers()
 	return e

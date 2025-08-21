@@ -33,26 +33,28 @@ import (
 type Group struct {
 	ctx *config.Context
 	log.Log
-	db            *DB
-	settingDB     *settingDB
-	userDB        *user.DB
-	groupService  IService
-	fileService   file.IService
-	commonService common2.IService
+	db                  *DB
+	settingDB           *settingDB
+	userDB              *user.DB
+	groupService        IService
+	fileService         file.IService
+	commonService       common2.IService
+	notificationService *common2.NotificationService
 }
 
 // New New
 func New(ctx *config.Context) *Group {
 
 	g := &Group{
-		ctx:           ctx,
-		Log:           log.NewTLog("Group"),
-		db:            NewDB(ctx),
-		userDB:        user.NewDB(ctx),
-		settingDB:     newSettingDB(ctx),
-		groupService:  NewService(ctx),
-		fileService:   file.NewService(ctx),
-		commonService: common2.NewService(ctx),
+		ctx:                 ctx,
+		Log:                 log.NewTLog("Group"),
+		db:                  NewDB(ctx),
+		userDB:              user.NewDB(ctx),
+		settingDB:           newSettingDB(ctx),
+		groupService:        NewService(ctx),
+		fileService:         file.NewService(ctx),
+		commonService:       common2.NewService(ctx),
+		notificationService: common2.NewNotificationService(*ctx),
 	}
 	g.ctx.AddEventListener(event.GroupDisband, g.handleGroupDisbandEvent)
 	g.ctx.AddEventListener(event.EventUserRegister, g.handleRegisterUserEvent)
@@ -608,13 +610,26 @@ func (g *Group) groupCreate(c *wkhttp.Context) {
 		}
 	}()
 
+	// 获取新成员是否可见历史消息的系统配置
+	allowViewHistoryMsg := 1 // 默认允许查看历史消息
+	if g.notificationService != nil {
+		if g.notificationService.IsNewMemberSeeHistoryEnabled() {
+			g.Debug("系统配置：允许新成员查看历史消息", zap.String("groupNo", groupNo))
+		} else {
+			allowViewHistoryMsg = 0 // 如果系统配置为不允许，则设置为0
+			g.Debug("系统配置：不允许新成员查看历史消息", zap.String("groupNo", groupNo))
+		}
+	} else {
+		g.Debug("通知服务未初始化，默认允许新成员查看历史消息", zap.String("groupNo", groupNo))
+	}
+
 	err = g.db.InsertTx(&Model{
 		GroupNo:             groupNo,
 		Name:                groupName,
 		Creator:             creator,
 		Status:              GroupStatusNormal,
 		Version:             version,
-		AllowViewHistoryMsg: int(common.GroupAllowViewHistoryMsgEnabled),
+		AllowViewHistoryMsg: allowViewHistoryMsg,
 	}, tx)
 	if err != nil {
 		g.Error("添加群失败！", zap.Error(err))
@@ -2215,10 +2230,14 @@ func (g *Group) memberRemove(c *wkhttp.Context) {
 		return
 	}
 
-	//给被踢的成员发送被踢消息
-	err = g.ctx.SendGroupMemberBeRemove(groupMemberRemoveReq)
-	if err != nil {
-		g.Warn("发送群成员被踢消息失败！", zap.Error(err))
+	//检查踢人通知配置是否启用，然后给被踢的成员发送被踢消息
+	if g.notificationService.IsGroupMemberKickNotifyEnabled() {
+		err = g.ctx.SendGroupMemberBeRemove(groupMemberRemoveReq)
+		if err != nil {
+			g.Warn("发送群成员被踢消息失败！", zap.Error(err))
+		}
+	} else {
+		g.Debug("踢人被踢消息通知已禁用，跳过发送", zap.String("groupNo", groupNo))
 	}
 
 	c.ResponseOK()
@@ -2487,10 +2506,14 @@ func (g *Group) groupExit(c *wkhttp.Context) {
 		showName = c.GetLoginName()
 	}
 	if groupInfo.Status != GroupStatusDisband && len(visiblesUids) > 0 {
-		// 发送群成员退出群聊消息
-		err = g.ctx.SendGroupExit(groupNo, loginUID, showName, visiblesUids)
-		if err != nil {
-			g.Error("发送成员退出群聊错误", zap.Error(err))
+		// 检查退群通知配置是否启用，然后发送群成员退出群聊消息
+		if g.notificationService.IsGroupMemberLeaveNotifyEnabled() {
+			err = g.ctx.SendGroupExit(groupNo, loginUID, showName, visiblesUids)
+			if err != nil {
+				g.Error("发送成员退出群聊错误", zap.Error(err))
+			}
+		} else {
+			g.Debug("退群通知已禁用，跳过发送", zap.String("groupNo", groupNo), zap.String("uid", loginUID))
 		}
 	}
 	c.ResponseOK()
