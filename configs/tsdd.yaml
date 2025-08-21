@@ -27,7 +27,7 @@ db:
 ##################### 外网配置 ####################
 external:
   ip: "112.121.164.130" # 外网ip
-  baseURL: "http://localhost:8090" # 外网访问地址 例如 http://10.2.3.1:8090
+  baseURL: "http://112.121.164.130:8090" # 外网访问地址 例如 http://10.2.3.1:8090
   webLoginURL: "http://112.121.164.130:82" # web im的登录地址 例如 https://web.tangsengdaodao.com
 
 ##################### 日志配置 ####################
@@ -121,11 +121,11 @@ account:
   adminUID: "admin" # 管理员uid
 
 ##################### 头像 #####################
-#avatar:
-#  defaultBaseURL: "" # 默认头像cdn地址
-#  default: "assets/assets/avatar.png" # 默认头像
-#  defaultCount: 900 # 默认头像数量
-#  partition: 100 # 头像分区数量
+avatar:
+  default: "assets/assets/avatar.png" # 默认头像
+  defaultCount: 900 # 默认头像数量
+  partition: 100 # 头像分区数量
+  # defaultBaseURL: "" # 默认头像cdn地址
 
 ##################### 短号配置 ####################
 #shortNo:

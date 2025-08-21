@@ -1,11 +1,11 @@
 
 # #################### 基础配置 ####################
 mode: "debug" #   运行模式 debug or release
-#addr: ":8090" # api监听地址
+addr: ":8090" # api监听地址
 #grpcAddr: "0.0.0.0:6979" # webhook grpc监听地址 给悟空IM提供的
-#appName: "唐僧叨叨" # 项目名称
+#appName: "先锋IM" # 项目名称
 #rootDir: "" # 数据根目录
-#messageSaveAcrossDevice: true # 消息是否跨设备保存（换设备登录消息是否还能同步到老消息）
+messageSaveAcrossDevice: true # 消息是否跨设备保存（换设备登录消息是否还能同步到老消息）
 #welcomeMessage: "欢迎使用{{appName}}" # 欢迎消息
 #phoneSearchOff: true # 关闭手机号搜索用户功能
 #onlineStatusOn: true # 开启在线状态功能
@@ -14,7 +14,7 @@ mode: "debug" #   运行模式 debug or release
 
 ##################### 悟空IM配置 ####################
 wukongIM:
- apiURL: "http://wukongim:5001" # 悟空IM的api地址 格式： http://xx.xx.xx.xx:5001
+ apiURL: "http://112.121.164.130:5001" # 悟空IM的api地址 格式： http://xx.xx.xx.xx:5001
  managerToken: "" # 悟空IM的管理者token 悟空IM配置了就需要填写，没配置就不需要
 
 ##################### db ####################
@@ -113,9 +113,10 @@ minio: # minio配置
 
 ##################### 头像 ####################
 avatar:
-  defaultBaseURL: "https://api.multiavatar.com/{avatar}.png" # 默认头像地址
-#  defaultCount: 900 # 默认头像数量
-#  partition: 100 # 头像分区数量
+  default: "assets/assets/avatar.png"  # ✅ 已开启
+  defaultCount: 900  # 🔧 建议开启 - 默认头像数量
+  partition: 100     # 🔧 建议开启 - 头像分区数量
+  # defaultBaseURL: "https://api.multiavatar.com/{avatar}.png"  # 在线头像服务（备用）
 
 ##################### 短号配置 ####################  
 #shortNo:
