@@ -3,13 +3,13 @@ mode: "release" #   运行模式 debug or release
 adminpwd: "123456" # 管理员密码
 #addr: ":8090" # api监听地址
 grpcAddr: "0.0.0.0:6979" # webhook grpc监听地址 给悟空IM提供的
-#appName: "唐僧叨叨" # 项目名称
+appName: "先锋IM" # 项目名称
 #rootDir: "tsdddata" # 数据根目录
 #messageSaveAcrossDevice: true # 消息是否跨设备保存（换设备登录消息是否还能同步到老消息）
 #welcomeMessage: "欢迎使用{{appName}}" # 欢迎消息
 #phoneSearchOff: true # 关闭手机号搜索用户功能
 #onlineStatusOn: true # 开启在线状态功能
-#groupUpgradeWhenMemberCount: 1000 # 群组人数达到多少人时，群组自动升级为超级群组
+groupUpgradeWhenMemberCount: 5000 # 群组人数达到多少人时，群组自动升级为超级群组
 #eventPoolSize: 100 # 事件池大小
 
 ##################### 悟空IM配置 ####################
@@ -122,7 +122,7 @@ account:
 
 ##################### 头像 #####################
 avatar:
-  default: "assets/assets/avatar.png" # 默认头像
+  default: "/Users/aguang/Documents/XFIM/xiangfengSever/assets/assets/avatar.png" # 默认头像
   defaultCount: 900 # 默认头像数量
   partition: 100 # 头像分区数量
   # defaultBaseURL: "" # 默认头像cdn地址
