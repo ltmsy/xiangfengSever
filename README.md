@@ -223,3 +223,8 @@ Star
 
 唐僧叨叨 使用 Apache 2.0 许可证。有关详情，请参阅 LICENSE 文件。
 
+启动命令 # 1. 编译
+go build -o main .
+
+# 2. 启动服务
+./main api

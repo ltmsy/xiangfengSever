@@ -1,6 +1,8 @@
 package group
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -28,6 +30,96 @@ import (
 	"github.com/gocraft/dbr/v2"
 	"go.uber.org/zap"
 )
+
+// WukongIMClient 悟空IM客户端
+type WukongIMClient struct {
+	baseURL    string
+	httpClient *http.Client
+}
+
+// AddSubscriberRequest 添加订阅者请求
+type AddSubscriberRequest struct {
+	ChannelID           string   `json:"channel_id"`
+	ChannelType         int      `json:"channel_type"`
+	Subscribers         []string `json:"subscribers"`
+	AllowViewHistoryMsg int      `json:"allow_view_history_msg"`
+	Reset               int      `json:"reset"`
+	TempSubscriber      int      `json:"temp_subscriber"`
+}
+
+// AddSubscriberResponse 添加订阅者响应
+type AddSubscriberResponse struct {
+	Code int    `json:"code"`
+	Msg  string `json:"msg"`
+}
+
+// NewWukongIMClient 创建悟空IM客户端
+func NewWukongIMClient(ctx *config.Context) *WukongIMClient {
+	// 从配置中获取悟空IM的base URL，如果没有配置则使用默认值
+	baseURL := ctx.GetConfig().WuKongIM.APIURL
+	if baseURL == "" {
+		baseURL = "http://localhost:8090" // 默认悟空IM地址
+	}
+
+	return &WukongIMClient{
+		baseURL: baseURL,
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+	}
+}
+
+// AddSubscriber 调用悟空IM添加订阅者接口
+func (w *WukongIMClient) AddSubscriber(req *AddSubscriberRequest) error {
+	url := fmt.Sprintf("%s/channel/subscriber_add", w.baseURL)
+
+	// 序列化请求数据
+	jsonData, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("序列化请求数据失败: %w", err)
+	}
+
+	// 创建HTTP请求
+	httpReq, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("创建HTTP请求失败: %w", err)
+	}
+
+	// 设置请求头
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("User-Agent", "TangSengDaoDao/1.0")
+
+	// 发送请求
+	resp, err := w.httpClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("发送HTTP请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// 读取响应
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	// 检查HTTP状态码
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("悟空IM接口返回错误状态码: %d, 响应: %s", resp.StatusCode, string(body))
+	}
+
+	// 解析响应
+	var response AddSubscriberResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		return fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	// 检查业务状态码
+	if response.Code != 0 {
+		return fmt.Errorf("悟空IM接口返回业务错误: %s", response.Msg)
+	}
+
+	return nil
+}
 
 // Group 群组相关API
 type Group struct {
@@ -1190,6 +1282,30 @@ func (g *Group) addMembersTx(members []string, groupNo string, operator, operato
 	if err != nil {
 		g.Error("调用IM的订阅接口失败！", zap.Error(err))
 		return nil, errors.New("调用IM的订阅接口失败！")
+	}
+
+	// 查询群组信息，获取历史消息查看权限设置
+	groupInfo, err := g.db.QueryWithGroupNo(groupNo)
+	if err != nil {
+		g.Error("查询群组信息失败！", zap.Error(err))
+		return nil, errors.New("查询群组信息失败！")
+	}
+
+	// 创建悟空IM客户端
+	wukongIMClient := NewWukongIMClient(g.ctx)
+
+	// 调用悟空IM的添加订阅者接口，传递群组历史消息查看权限设置
+	err = wukongIMClient.AddSubscriber(&AddSubscriberRequest{
+		ChannelID:           groupNo,
+		ChannelType:         2, // 群组类型
+		Subscribers:         realMembers,
+		AllowViewHistoryMsg: groupInfo.AllowViewHistoryMsg, // 传递群组权限设置
+		Reset:               0,
+		TempSubscriber:      0,
+	})
+	if err != nil {
+		g.Error("调用悟空IM添加订阅者失败！", zap.Error(err))
+		return nil, fmt.Errorf("调用悟空IM添加订阅者失败: %w", err)
 	}
 
 	return func() {
