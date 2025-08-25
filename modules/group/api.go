@@ -1273,17 +1273,6 @@ func (g *Group) addMembersTx(members []string, groupNo string, operator, operato
 			return nil, errors.New("开启群成员头像更新事件失败！")
 		}
 	}
-	// 调用IM的添加订阅者
-	err = g.ctx.IMAddSubscriber(&config.SubscriberAddReq{
-		ChannelID:   groupNo,
-		ChannelType: common.ChannelTypeGroup.Uint8(),
-		Subscribers: realMembers,
-	})
-	if err != nil {
-		g.Error("调用IM的订阅接口失败！", zap.Error(err))
-		return nil, errors.New("调用IM的订阅接口失败！")
-	}
-
 	// 查询群组信息，获取历史消息查看权限设置
 	groupInfo, err := g.db.QueryWithGroupNo(groupNo)
 	if err != nil {
@@ -1877,16 +1866,31 @@ func (g *Group) groupScanJoin(c *wkhttp.Context) {
 		c.ResponseError(errors.New("添加群成员失败！"))
 		return
 	}
-	// 调用IM的添加订阅者
-	err = g.ctx.IMAddSubscriber(&config.SubscriberAddReq{
-		ChannelID:   groupNo,
-		ChannelType: common.ChannelTypeGroup.Uint8(),
-		Subscribers: []string{scaner},
+	// 查询群组信息，获取历史消息查看权限设置
+	groupInfo, err := g.db.QueryWithGroupNo(groupNo)
+	if err != nil {
+		tx.RollbackUnlessCommitted()
+		g.Error("查询群组信息失败！", zap.Error(err))
+		c.ResponseError(errors.New("查询群组信息失败！"))
+		return
+	}
+
+	// 创建悟空IM客户端
+	wukongIMClient := NewWukongIMClient(g.ctx)
+
+	// 调用悟空IM的添加订阅者接口，传递群组历史消息查看权限设置
+	err = wukongIMClient.AddSubscriber(&AddSubscriberRequest{
+		ChannelID:           groupNo,
+		ChannelType:         2, // 群组类型
+		Subscribers:         []string{scaner},
+		AllowViewHistoryMsg: groupInfo.AllowViewHistoryMsg, // 传递群组权限设置
+		Reset:               0,
+		TempSubscriber:      0,
 	})
 	if err != nil {
 		tx.RollbackUnlessCommitted()
-		g.Error("调用IM的订阅接口失败！", zap.Error(err))
-		c.ResponseError(errors.New("调用IM的订阅接口失败！"))
+		g.Error("调用悟空IM添加订阅者失败！", zap.Error(err))
+		c.ResponseError(errors.New("调用悟空IM添加订阅者失败！"))
 		return
 	}
 
