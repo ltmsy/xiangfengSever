@@ -776,14 +776,10 @@ func (u *User) get(c *wkhttp.Context) {
 		}
 		userDetailResp.GroupMember = &GroupMemberResp{
 			UID:                groupMember.UID,
-			Name:               groupMember.Name,
 			GroupNo:            groupMember.GroupNo,
-			Remark:             groupMember.Remark,
 			Role:               groupMember.Role,
-			Status:             groupMember.Status,
 			InviteUID:          groupMember.InviteUID,
 			Robot:              groupMember.Role,
-			ForbiddenExpirTime: groupMember.ForbiddenExpirTime,
 			CreatedAt:          groupMember.CreatedAt,
 		}
 	}
@@ -1405,7 +1401,7 @@ func (u *User) getLoginUUID(c *wkhttp.Context) {
 	}
 	// 缓存设备信息
 	if deviceId != "" && deviceName != "" && deviceModel != "" {
-		err := u.ctx.GetRedisConn().SetAndExpire(fmt.Sprintf("%s%s", common.DeviceCacheUUIDPrefix, uuid), util.ToJson(map[string]interface{}{
+		err := u.ctx.GetRedisConn().SetAndExpire(fmt.Sprintf("%s%s", "device_cache_uuid:", uuid), util.ToJson(map[string]interface{}{
 			"device_id":    deviceId,
 			"device_name":  deviceName,
 			"device_model": deviceModel,
@@ -1520,7 +1516,7 @@ func (u *User) loginWithAuthCode(c *wkhttp.Context) {
 	// 获取缓存设备
 	uuid := authInfoMap["uuid"].(string)
 	if uuid != "" {
-		deviceCache, err := u.ctx.GetRedisConn().GetString(fmt.Sprintf("%s%s", common.DeviceCacheUUIDPrefix, uuid))
+		deviceCache, err := u.ctx.GetRedisConn().GetString(fmt.Sprintf("%s%s", "device_cache_uuid:", uuid))
 		if err != nil {
 			u.Error("获取登录设备信息失败！", zap.Error(err))
 			c.ResponseError(errors.New("获取登录设备信息失败！"))

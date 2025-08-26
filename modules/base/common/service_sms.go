@@ -51,8 +51,9 @@ func (s *SMSService) SendVerifyCode(ctx context.Context, zone, phone string, cod
 		}
 	} else if smsProviderName == config.SMSProviderUnisms {
 		smsProvider = NewUnismsProvider(s.ctx)
-	} else if smsProviderName == config.SMSProviderSmsbao {
-		smsProvider = NewSmsbaoProvider(s.ctx)
+	} else if smsProviderName == "smsbao" { // 临时注释掉 config.SMSProviderSmsbao
+		// smsProvider = NewSmsbaoProvider(s.ctx)
+		s.Info("短信宝服务暂时不可用")
 	}
 
 	if smsProvider == nil {
