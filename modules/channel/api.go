@@ -231,31 +231,31 @@ func (ch *Channel) state(c *wkhttp.Context) {
 		fakeChannelId = common.GetFakeChannelIDWith(loginUID, channelID)
 	}
 	callChannelIDs = append(callChannelIDs, fakeChannelId)
-	// var callingChannels []*model.CallingChannelResp
-	// modules := register.GetModules(ch.ctx)
-	// for _, m := range modules {
-	// 	if m.BussDataSource.GetCallingChannel != nil {
-	// 		callingChannels, _ = m.BussDataSource.GetCallingChannel(loginUID, callChannelIDs)
-	// 		break
-	// 	}
-	// }
-	// var callingParticipantResp []*CallingParticipantResp
-	// roomName := ""
-	// if len(callingChannels) > 0 && callingChannels[0] != nil && len(callingChannels[0].Participants) > 0 {
-	// 	roomName = callingChannels[0].RoomName
-	// 	for _, p := range callingChannels[0].Participants {
-	// 		callingParticipantResp = append(callingParticipantResp, &CallingParticipantResp{
-	// 			UID:  p.UID,
-	// 			Name: p.Name,
-	// 		})
-	// 	}
-	// }
+	var callingChannels []*model.CallingChannelResp
+	modules := register.GetModules(ch.ctx)
+	for _, m := range modules {
+		if m.BussDataSource.GetCallingChannel != nil {
+			callingChannels, _ = m.BussDataSource.GetCallingChannel(loginUID, callChannelIDs)
+			break
+		}
+	}
+	var callingParticipantResp []*CallingParticipantResp
+	roomName := ""
+	if len(callingChannels) > 0 && callingChannels[0] != nil && len(callingChannels[0].Participants) > 0 {
+		roomName = callingChannels[0].RoomName
+		for _, p := range callingChannels[0].Participants {
+			callingParticipantResp = append(callingParticipantResp, &CallingParticipantResp{
+				UID:  p.UID,
+				Name: p.Name,
+			})
+		}
+	}
 	c.Response(stateResp{
 		SignalOn:    signalOn,
 		OnlineCount: onlineCount,
 		CallInfo: &rtcResp{
-			RoomName:            "",
-			CallingParticipants: []*CallingParticipantResp{},
+			RoomName:            roomName,
+			CallingParticipants: callingParticipantResp,
 		},
 	})
 

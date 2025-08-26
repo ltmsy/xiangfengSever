@@ -15,7 +15,9 @@ import (
 	"github.com/TangSengDaoDao/TangSengDaoDaoServer/modules/user"
 	"github.com/TangSengDaoDao/TangSengDaoDaoServerLib/common"
 	"github.com/TangSengDaoDao/TangSengDaoDaoServerLib/config"
+	"github.com/TangSengDaoDao/TangSengDaoDaoServerLib/model"
 	"github.com/TangSengDaoDao/TangSengDaoDaoServerLib/pkg/log"
+	"github.com/TangSengDaoDao/TangSengDaoDaoServerLib/pkg/register"
 	"github.com/TangSengDaoDao/TangSengDaoDaoServerLib/pkg/util"
 	"github.com/TangSengDaoDao/TangSengDaoDaoServerLib/pkg/wkhttp"
 	"github.com/gin-gonic/gin"
@@ -550,25 +552,25 @@ func (co *Conversation) syncUserConversation(c *wkhttp.Context) {
 			callChannelIDs = append(callChannelIDs, fakeChannelID)
 		}
 	}
-	// var callingChannels []*model.CallingChannelResp
-	// modules := register.GetModules(co.ctx)
-	// for _, m := range modules {
-	// 	if m.BussDataSource.GetCallingChannel != nil {
-	// 		callingChannels, _ = m.BussDataSource.GetCallingChannel(loginUID, callChannelIDs)
-	// 		break
-	// 	}
-	// }
-	// println("查询到通话中的频道", len(callingChannels))
+	var callingChannels []*model.CallingChannelResp
+	modules := register.GetModules(co.ctx)
+	for _, m := range modules {
+		if m.BussDataSource.GetCallingChannel != nil {
+			callingChannels, _ = m.BussDataSource.GetCallingChannel(loginUID, callChannelIDs)
+			break
+		}
+	}
+	println("查询到通话中的频道", len(callingChannels))
 	channelStates := make([]*ChannelState, 0)
-	// if len(callingChannels) > 0 {
-	// 	for _, channel := range callingChannels {
-	// 		channelStates = append(channelStates, &ChannelState{
-	// 			ChannelID:   channel.ChannelID,
-	// 			ChannelType: channel.ChannelType,
-	// 			Calling:     1,
-	// 		})
-	// 	}
-	// }
+	if len(callingChannels) > 0 {
+		for _, channel := range callingChannels {
+			channelStates = append(channelStates, &ChannelState{
+				ChannelID:   channel.ChannelID,
+				ChannelType: channel.ChannelType,
+				Calling:     1,
+			})
+		}
+	}
 	c.Response(SyncUserConversationRespWrap{
 		Conversations: syncUserConversationResps,
 		UID:           loginUID,

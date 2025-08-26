@@ -51,7 +51,7 @@ func (s *SMSService) SendVerifyCode(ctx context.Context, zone, phone string, cod
 		}
 	} else if smsProviderName == config.SMSProviderUnisms {
 		smsProvider = NewUnismsProvider(s.ctx)
-	} else if smsProviderName == "smsbao" {
+	} else if smsProviderName == config.SMSProviderSmsbao {
 		smsProvider = NewSmsbaoProvider(s.ctx)
 	}
 

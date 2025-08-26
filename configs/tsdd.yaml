@@ -123,7 +123,7 @@ account:
 
 ##################### 头像 #####################
 avatar:
-  default: "/Users/aguang/Documents/XFIM/xiangfengSever/assets/assets/avatar.png" # 默认头像
+  default: "/opt/xiangfengSever/assets/assets/avatar.png" # 默认头像
   defaultCount: 900 # 默认头像数量
   partition: 100 # 头像分区数量
   # defaultBaseURL: "" # 默认头像cdn地址

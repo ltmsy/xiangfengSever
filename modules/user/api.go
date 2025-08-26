@@ -743,7 +743,7 @@ func (u *User) get(c *wkhttp.Context) {
 	}
 	isShowShortNo := false
 	vercode := ""
-	var groupMember *GroupMemberResp
+	var groupMember *model.GroupMemberResp
 	if groupNo != "" {
 		modules := register.GetModules(u.ctx)
 		for _, m := range modules {
@@ -755,17 +755,7 @@ func (u *User) get(c *wkhttp.Context) {
 				}
 			}
 			if m.BussDataSource.GetGroupMember != nil && groupMember == nil {
-				modelGroupMember, _ := m.BussDataSource.GetGroupMember(groupNo, uid)
-				if modelGroupMember != nil {
-					groupMember = &GroupMemberResp{
-						UID:       modelGroupMember.UID,
-						GroupNo:   modelGroupMember.GroupNo,
-						Role:      modelGroupMember.Role,
-						InviteUID: modelGroupMember.InviteUID,
-						Robot:     modelGroupMember.Role,
-						CreatedAt: modelGroupMember.CreatedAt,
-					}
-				}
+				groupMember, _ = m.BussDataSource.GetGroupMember(groupNo, uid)
 			}
 		}
 	}
@@ -786,7 +776,9 @@ func (u *User) get(c *wkhttp.Context) {
 		}
 		userDetailResp.GroupMember = &GroupMemberResp{
 			UID:                groupMember.UID,
+			Name:               groupMember.Name,
 			GroupNo:            groupMember.GroupNo,
+			Remark:             groupMember.Remark,
 			Role:               groupMember.Role,
 			Status:             groupMember.Status,
 			InviteUID:          groupMember.InviteUID,
@@ -1413,7 +1405,7 @@ func (u *User) getLoginUUID(c *wkhttp.Context) {
 	}
 	// 缓存设备信息
 	if deviceId != "" && deviceName != "" && deviceModel != "" {
-		err := u.ctx.GetRedisConn().SetAndExpire(fmt.Sprintf("%s%s", u.ctx.GetConfig().Cache.LoginDeviceCachePrefix, uuid), util.ToJson(map[string]interface{}{
+		err := u.ctx.GetRedisConn().SetAndExpire(fmt.Sprintf("%s%s", common.DeviceCacheUUIDPrefix, uuid), util.ToJson(map[string]interface{}{
 			"device_id":    deviceId,
 			"device_name":  deviceName,
 			"device_model": deviceModel,
@@ -1528,7 +1520,7 @@ func (u *User) loginWithAuthCode(c *wkhttp.Context) {
 	// 获取缓存设备
 	uuid := authInfoMap["uuid"].(string)
 	if uuid != "" {
-		deviceCache, err := u.ctx.GetRedisConn().GetString(fmt.Sprintf("%s%s", u.ctx.GetConfig().Cache.LoginDeviceCachePrefix, uuid))
+		deviceCache, err := u.ctx.GetRedisConn().GetString(fmt.Sprintf("%s%s", common.DeviceCacheUUIDPrefix, uuid))
 		if err != nil {
 			u.Error("获取登录设备信息失败！", zap.Error(err))
 			c.ResponseError(errors.New("获取登录设备信息失败！"))

@@ -13,7 +13,9 @@ import (
 	"github.com/TangSengDaoDao/TangSengDaoDaoServer/modules/user"
 	"github.com/TangSengDaoDao/TangSengDaoDaoServerLib/common"
 	"github.com/TangSengDaoDao/TangSengDaoDaoServerLib/config"
+	"github.com/TangSengDaoDao/TangSengDaoDaoServerLib/model"
 	"github.com/TangSengDaoDao/TangSengDaoDaoServerLib/pkg/log"
+	"github.com/TangSengDaoDao/TangSengDaoDaoServerLib/pkg/register"
 	"github.com/TangSengDaoDao/TangSengDaoDaoServerLib/pkg/util"
 	"github.com/TangSengDaoDao/TangSengDaoDaoServerLib/pkg/wkevent"
 	"github.com/TangSengDaoDao/TangSengDaoDaoServerLib/pkg/wkhttp"
@@ -521,28 +523,28 @@ func (m *Manager) recordpersonal(c *wkhttp.Context) {
 			ReadedCount: readedCount,
 		})
 	}
-	// var devices []*model.DeviceResp
-	// if len(ids) > 0 {
-	// 	modules := register.GetModules(m.ctx)
-	// 	for _, module := range modules {
-	// 	if module.BussDataSource.GetDevice != nil {
-	// 		devices, _ = module.BussDataSource.GetDevice(ids)
-	// 		break
-	// 	}
-	// 	}
-	// }
-	// if len(devices) > 0 && len(list) > 0 {
-	// 	for _, device := range devices {
-	// 		for _, msg := range list {
-	// 			if msg.DeviceDBID == device.ID {
-	// 				msg.DeviceID = device.DeviceID
-	// 				msg.DeviceName = device.DeviceName
-	// 				msg.DeviceModel = device.DeviceModel
-	// 				break
-	// 			}
-	// 		}
-	// 	}
-	// }
+	var devices []*model.DeviceResp
+	if len(ids) > 0 {
+		modules := register.GetModules(m.ctx)
+		for _, module := range modules {
+			if module.BussDataSource.GetDevice != nil {
+				devices, _ = module.BussDataSource.GetDevice(ids)
+				break
+			}
+		}
+	}
+	if len(devices) > 0 && len(list) > 0 {
+		for _, device := range devices {
+			for _, msg := range list {
+				if msg.DeviceDBID == device.ID {
+					msg.DeviceID = device.DeviceID
+					msg.DeviceName = device.DeviceName
+					msg.DeviceModel = device.DeviceModel
+					break
+				}
+			}
+		}
+	}
 	c.Response(&recordResp{
 		Count: count,
 		List:  list,
@@ -916,28 +918,28 @@ func (m *Manager) record(c *wkhttp.Context) {
 		})
 	}
 
-	// var devices []*model.DeviceResp
-	// if len(ids) > 0 {
-	// 	modules := register.GetModules(m.ctx)
-	// 	for _, module := range modules {
-	// 		if module.BussDataSource.GetDevice != nil {
-	// 			devices, _ = module.BussDataSource.GetDevice(ids)
-	// 			break
-	// 		}
-	// 	}
-	// }
-	// if len(devices) > 0 && len(list) > 0 {
-	// 	for _, device := range devices {
-	// 		for _, msg := range list {
-	// 			if msg.DeviceDBID == device.ID {
-	// 				msg.DeviceID = device.DeviceID
-	// 				msg.DeviceName = device.DeviceName
-	// 				msg.DeviceModel = device.DeviceModel
-	// 				break
-	// 			}
-	// 		}
-	// 	}
-	// }
+	var devices []*model.DeviceResp
+	if len(ids) > 0 {
+		modules := register.GetModules(m.ctx)
+		for _, module := range modules {
+			if module.BussDataSource.GetDevice != nil {
+				devices, _ = module.BussDataSource.GetDevice(ids)
+				break
+			}
+		}
+	}
+	if len(devices) > 0 && len(list) > 0 {
+		for _, device := range devices {
+			for _, msg := range list {
+				if msg.DeviceDBID == device.ID {
+					msg.DeviceID = device.DeviceID
+					msg.DeviceName = device.DeviceName
+					msg.DeviceModel = device.DeviceModel
+					break
+				}
+			}
+		}
+	}
 	c.Response(&recordResp{
 		Count: count,
 		List:  list,
