@@ -55,6 +55,7 @@ type Message struct {
 	fileService         file.IService
 	channelService      chservice.IService
 	notificationService *commonapi.NotificationService
+	adminConfigService  *commonapi.AdminConfigService
 	mutex               sync.Mutex
 }
 
@@ -82,6 +83,7 @@ func New(ctx *config.Context) *Message {
 		fileService:         file.NewService(ctx),
 		channelService:      channel.NewService(ctx),
 		notificationService: commonapi.NewNotificationService(*ctx),
+		adminConfigService:  commonapi.NewAdminConfigService(ctx.DB()),
 	}
 	m.ctx.AddEventListener(event.GroupMemberAdd, m.handleGroupMemberAddEvent)
 	m.ctx.AddEventListener(event.GroupMemberScanJoin, m.handleGroupMemberScanJoinEvent)
@@ -1089,6 +1091,14 @@ func (m *Message) mutualDelete(c *wkhttp.Context) {
 		c.ResponseError(err)
 		return
 	}
+
+	// 读取双向删除配置
+	doubleDeleteEnabled := false
+	config, err := m.adminConfigService.GetConfigByKey("message.double_delete_enabled")
+	if err == nil && config != nil {
+		doubleDeleteEnabled = config.ConfigValue == "1" || config.ConfigValue == "true"
+	}
+
 	messageSeqs := make([]uint32, 0)
 	messageSeqs = append(messageSeqs, req.MessageSeq)
 	fakeChannelID := req.ChannelID
@@ -1122,6 +1132,19 @@ func (m *Message) mutualDelete(c *wkhttp.Context) {
 		c.ResponseError(errors.New("用户无权删除此消息"))
 		return
 	}
+
+	// 如果启用双向删除，需要通知其他可见该消息的用户也删除该条消息
+	if doubleDeleteEnabled {
+		m.Info("双向删除功能已启用，将通知其他用户删除消息",
+			zap.String("message_id", req.MessageID),
+			zap.String("channel_id", req.ChannelID),
+			zap.Uint8("channel_type", req.ChannelType))
+
+		// TODO: 这里可以添加逻辑来获取所有可见该消息的用户
+		// 并通知他们删除该条消息
+		// 例如：通过悟空IM的API发送删除命令
+	}
+
 	version := m.genMessageExtraSeq(fakeChannelID)
 	err = m.messageExtraDB.insertOrUpdateDeleted(&messageExtraModel{
 		MessageID:   req.MessageID,

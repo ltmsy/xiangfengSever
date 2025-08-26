@@ -264,6 +264,11 @@ func (s *AdminConfigService) GetPublicConfigs() (map[string]string, error) {
 	return s.adminConfigDB.GetPublicConfigs()
 }
 
+// GetConfigByKey 根据配置键获取配置
+func (s *AdminConfigService) GetConfigByKey(configKey string) (*AdminSystemConfig, error) {
+	return s.adminConfigDB.GetConfigByKey(configKey)
+}
+
 // AddConfig 添加配置
 func (s *AdminConfigService) AddConfig(config *AdminSystemConfig) error {
 	if strings.TrimSpace(config.ConfigKey) == "" {
